@@ -211,7 +211,7 @@ object TestFramework
 	def createTestLoader(classpath: Seq[File], scalaInstance: ScalaInstance, tempDir: File): ClassLoader =
 	{
 		val interfaceJar = IO.classLocationFile(classOf[org.scalatools.testing.Framework])
-		val interfaceFilter = (name: String) => name.startsWith("org.scalatools.testing.")
+		val interfaceFilter = (name: String) => name.startsWith("org.scalatools.testing.") || name.startsWith("org.scalasbt.testing.")
 		val notInterfaceFilter = (name: String) => !interfaceFilter(name)
 		val dual = new DualLoader(scalaInstance.loader, notInterfaceFilter, x => true, getClass.getClassLoader, interfaceFilter, x => false)
 		val main = ClasspathUtilities.makeLoader(classpath, dual, scalaInstance, tempDir)
