@@ -15,26 +15,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ForkMain {
-	static class SubclassFingerscan implements SubclassFingerprint, Serializable {
-		private boolean isModule;
-		private String superClassName;
-		SubclassFingerscan(SubclassFingerprint print) {
-			isModule = print.isModule();
-			superClassName = print.superclassName();
-		}
-		public boolean isModule() { return isModule; }
-		public String superclassName() { return superClassName; }
-	}
-	static class AnnotatedFingerscan implements AnnotatedFingerprint, Serializable {
-		private boolean isModule;
-		private String annotationName;
-		AnnotatedFingerscan(AnnotatedFingerprint print) {
-			isModule = print.isModule();
-			annotationName = print.annotationName();
-		}
-		public boolean isModule() { return isModule; }
-		public String annotationName() { return annotationName; }
-	}
 	public static class ForkTestDefinition implements Serializable {
 		public String name;
 		public Fingerprint fingerprint;
@@ -44,11 +24,11 @@ public class ForkMain {
 			this.name = name;
 			if (fingerprint instanceof SubclassFingerprint) {
 				SubclassFingerprint subClassFingerprint = (SubclassFingerprint) fingerprint;
-				this.fingerprint = new SubclassFingerscan(subClassFingerprint);
+				this.fingerprint = subClassFingerprint;
 				this.isModule = subClassFingerprint.isModule();
 			} else {
 				AnnotatedFingerprint annotatedFingerprint = (AnnotatedFingerprint) fingerprint;
-				this.fingerprint = new AnnotatedFingerscan(annotatedFingerprint);
+				this.fingerprint = annotatedFingerprint;
 				this.isModule = annotatedFingerprint.isModule();
 			}
 		}
@@ -149,7 +129,11 @@ public class ForkMain {
 
 				final Framework framework;
 				try {
-					framework = (Framework) Class.forName(implClassName).newInstance();
+					Object rawFramework = Class.forName(implClassName).newInstance();
+					if (rawFramework instanceof Framework)
+						framework = (Framework) rawFramework;
+					else
+					    framework = new FrameworkWrapper((org.scalatools.testing.Framework) rawFramework);
 				} catch (ClassNotFoundException e) {
 					logError(os, "Framework implementation '" + implClassName + "' not present.");
 					continue;
