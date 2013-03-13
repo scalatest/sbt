@@ -714,7 +714,7 @@ object Defaults extends BuildCommon
 	def discoverSbtPlugins(analysis: inc.Analysis, log: Logger): Set[String] =
 	{
 		val pluginClass = classOf[Plugin].getName
-		val discovery = Discovery(Set(pluginClass), Set.empty)( Tests allDefs analysis )
+		val discovery = Discovery(Set(pluginClass), Set.empty, Set.empty)( Tests allDefs analysis )
 		discovery collect { case (df, disc) if (disc.baseClasses contains pluginClass) && disc.isModule => df.name } toSet;
 	}
 
