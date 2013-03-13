@@ -33,7 +33,7 @@ public class ForkMain {
 			}
 		}
 	}
-	static class ForkError extends Exception {
+	static class ForkError extends Exception implements Serializable {
 		private String originalMessage;
 		private ForkError cause;
 		ForkError(Throwable t) {
@@ -89,17 +89,12 @@ public class ForkMain {
 				AnnotatedFingerprint af2 = (AnnotatedFingerprint) f2;
 				return af1.isModule() == af2.isModule() && af1.annotationName().equals(af2.annotationName());
 			}
-			else if (f1 instanceof DoNotDiscoverFingerprint && f2 instanceof DoNotDiscoverFingerprint) {
-				DoNotDiscoverFingerprint af1 = (DoNotDiscoverFingerprint) f1;
-				DoNotDiscoverFingerprint af2 = (DoNotDiscoverFingerprint) f2;
-				return !(af1.annotationName().equals(af2.annotationName()));
-			}
 			return false;
 		}
 		class RunAborted extends RuntimeException {
 			RunAborted(Exception e) { super(e); }
 		}
-		void write(ObjectOutputStream os, Object obj) {
+		synchronized void write(ObjectOutputStream os, Object obj) {
 			try {
 				os.writeObject(obj);
 				os.flush();
@@ -118,7 +113,7 @@ public class ForkMain {
 			final ForkTestDefinition[] tests = (ForkTestDefinition[]) is.readObject();
 			int nFrameworks = is.readInt();
 			Logger[] loggers = {
-				new Logger() {
+				new org.scalasbt.testing.Logger() {
 					public boolean ansiCodesSupported() { return ansiCodesSupported; }
 					public void error(String s) { logError(os, s); }
 					public void warn(String s) { write(os, new Object[]{ForkTags.Warn, s}); }
@@ -129,20 +124,27 @@ public class ForkMain {
 			};
 
 			for (int i = 0; i < nFrameworks; i++) {
-				final String implClassName = (String) is.readObject();
+				final String[] implClassNames = (String[]) is.readObject();
 				final String[] frameworkArgs = (String[]) is.readObject();
+				final String[] remoteFrameworkArgs = (String[]) is.readObject();
 
-				final Framework framework;
-				try {
-					Object rawFramework = Class.forName(implClassName).newInstance();
-					if (rawFramework instanceof Framework)
-						framework = (Framework) rawFramework;
-					else
-					    framework = new FrameworkWrapper((org.scalatools.testing.Framework) rawFramework);
-				} catch (ClassNotFoundException e) {
-					logError(os, "Framework implementation '" + implClassName + "' not present.");
-					continue;
+				Framework framework = null;
+				
+				for (String implClassName : implClassNames) {
+					try {
+						Object rawFramework = Class.forName(implClassName).newInstance();
+						if (rawFramework instanceof Framework)
+							framework = (Framework) rawFramework;
+						else
+						    framework = new FrameworkWrapper((org.scalatools.testing.Framework) rawFramework);
+						break;
+					} catch (ClassNotFoundException e) {
+						logError(os, "Framework implementation '" + implClassName + "' not present.");
+					}
 				}
+				
+				if (framework == null)
+                    continue;
 
 				ArrayList<ForkTestDefinition> filteredTests = new ArrayList<ForkTestDefinition>();
 				for (Fingerprint testFingerprint : framework.fingerprints()) {
@@ -150,9 +152,10 @@ public class ForkMain {
 						if (matches(testFingerprint, test.fingerprint)) filteredTests.add(test);
 					}
 				}
-				final Runner runner = framework.runner(frameworkArgs, getClass().getClassLoader());
+				final Runner runner = framework.runner(frameworkArgs, remoteFrameworkArgs, getClass().getClassLoader());
 				for (ForkTestDefinition test : filteredTests)
 					runTestSafe(test, runner, loggers, os);
+				runner.done();
 			}
 			write(os, ForkTags.Done);
 			is.readObject();

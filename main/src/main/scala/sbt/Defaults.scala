@@ -15,7 +15,7 @@ package sbt
 	import complete._
 	import std.TaskExtra._
 	import inc.{FileValueCache, Locate}
-	import org.scalasbt.testing.{Framework, AnnotatedFingerprint, SubclassFingerprint}
+	import org.scalasbt.testing.{Framework, Runner, AnnotatedFingerprint, SubclassFingerprint}
 
 	import sys.error
 	import scala.xml.NodeSeq
@@ -338,9 +338,14 @@ object Defaults extends BuildCommon
 		testOptions in GlobalScope :== Nil,
 		testFilter in testOnly :== (selectedFilter _),
 		testFilter in testQuick <<= testQuickFilter,
-		executeTests <<= (streams in test, loadedTestFrameworks, testLoader, testGrouping in test, testExecution in test, fullClasspath in test, javaHome in test) flatMap allTestGroupsTask,
+		testRunners := createTestRunners(loadedTestFrameworks.value, testLoader.value, (testExecution in test).value),
+		executeTests <<= (streams in test, loadedTestFrameworks, testLoader, testRunners, testGrouping in test, testExecution in test, fullClasspath in test, javaHome in test) flatMap allTestGroupsTask,
 		test := {
 			implicit val display = Project.showContextKey(state.value)
+			val doneResults = 
+			  testRunners.value map { case (tf, r) =>
+			    r.done()
+			  }
 			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value))
 		},
 		testOnly <<= inputTests(testOnly),
@@ -436,25 +441,38 @@ object Defaults extends BuildCommon
 			implicit val display = Project.showContextKey(state.value)
 			val modifiedOpts = Tests.Filters(filter(selected)) +: Tests.Argument(frameworkOptions : _*) +: config.options
 			val newConfig = config.copy(options = modifiedOpts)
-			val groupsTask = allTestGroupsTask(s, loadedTestFrameworks.value, testLoader.value, testGrouping.value, newConfig, fullClasspath.value, javaHome.value)
+			val groupsTask = allTestGroupsTask(s, loadedTestFrameworks.value, testLoader.value, testRunners.value, testGrouping.value, newConfig, fullClasspath.value, javaHome.value)
 			val processed =
 				for(out <- groupsTask) yield
 					Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value))
 			Def.value(processed)
 		}
 	}
+	
+	def createTestRunners(frameworks: Map[TestFramework,Framework], loader: ClassLoader, config: Tests.Execution) = {
+	  import Tests.Argument
+	  val opts = config.options.toList
+	  frameworks.map { case (tf, f) =>
+		val args = opts.flatMap {
+		  case Argument(None | Some(`tf`), args) => args
+		  case _ => Nil
+	    }
+		val mainRunner = f.runner(args.toArray, Array.empty[String], loader)
+		tf -> mainRunner
+      }
+	}
 
-	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, groups: Seq[Tests.Group], config: Tests.Execution,	cp: Classpath, javaHome: Option[File]): Task[Tests.Output] = {
-		val groupTasks = groups map {
+	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, runners: Map[TestFramework, Runner], groups: Seq[Tests.Group], config: Tests.Execution,	cp: Classpath, javaHome: Option[File]): Task[Tests.Output] = {
+	  val groupTasks = groups map {
 			case Tests.Group(name, tests, runPolicy) =>
 				runPolicy match {
 					case Tests.SubProcess(opts) =>
-						ForkTests(frameworks.keys.toSeq, tests.toList, config, cp.files, opts, s.log) tag Tags.ForkedTestGroup
+						ForkTests(runners, tests.toList, config, cp.files, opts, s.log) tag Tags.ForkedTestGroup
 					case Tests.InProcess =>
-						Tests(frameworks, loader, tests, config, s.log)
+						Tests(frameworks, loader, runners, tests, config, s.log)
 				}
 		}
-		Tests.foldTasks(groupTasks, config.parallel)
+	  Tests.foldTasks(groupTasks, config.parallel)
 	}
 
 	def selectedFilter(args: Seq[String]): Seq[String => Boolean] =
@@ -705,7 +723,7 @@ object Defaults extends BuildCommon
 	def discoverSbtPlugins(analysis: inc.Analysis, log: Logger): Set[String] =
 	{
 		val pluginClass = classOf[Plugin].getName
-		val discovery = Discovery(Set(pluginClass), Set.empty)( Tests allDefs analysis )
+		val discovery = Discovery(Set(pluginClass), Set.empty, Set.empty)( Tests allDefs analysis )
 		discovery collect { case (df, disc) if (disc.baseClasses contains pluginClass) && disc.isModule => df.name } toSet;
 	}
 

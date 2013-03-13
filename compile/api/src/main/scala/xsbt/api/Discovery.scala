@@ -7,7 +7,7 @@ package xsbt.api
 
 import Discovery._
 
-class Discovery(baseClasses: Set[String], annotations: Set[String])
+class Discovery(baseClasses: Set[String], annotations: Set[String], doNotDiscoverAnnotations: Set[String])
 {
 	def apply(s: Seq[Definition]): Seq[(Definition, Discovered)] =
 		s.map { d => (d, apply(d)) }
@@ -22,7 +22,8 @@ class Discovery(baseClasses: Set[String], annotations: Set[String])
 		val onClass = Discovery.findAnnotations(c.annotations, annotations)
 		val onDefs = Discovery.defAnnotations(c.structure, annotations) ++ c.savedAnnotations.filter(annotations)
 		val module = isModule(c)
-		new Discovered( bases(c.name, c.structure.parents), onClass ++ onDefs, module && hasMainMethod(c), module )
+		val doNotDiscover = Discovery.findAnnotations(c.annotations, doNotDiscoverAnnotations).size > 0
+		new Discovered( bases(c.name, c.structure.parents), onClass ++ onDefs, module && hasMainMethod(c), module, doNotDiscover)
 	}
 	def bases(own: String, c: Seq[Type]): Set[String] =
 		(own +: c.flatMap(simpleName)).filter(baseClasses).toSet
@@ -30,13 +31,13 @@ class Discovery(baseClasses: Set[String], annotations: Set[String])
 }
 object Discovery
 {
-	def apply(subclasses: Set[String], annotations: Set[String])(definitions: Seq[Definition]): Seq[(Definition, Discovered)] =
+	def apply(subclasses: Set[String], annotations: Set[String], doNotDiscoverAnnotations: Set[String])(definitions: Seq[Definition]): Seq[(Definition, Discovered)] =
 	{
-		val d = new Discovery(subclasses, annotations)
+		val d = new Discovery(subclasses, annotations, doNotDiscoverAnnotations)
 		d(definitions)
 	}
 	def applications(definitions: Seq[Definition]): Seq[(Definition, Discovered)] =
-		apply(Set.empty, Set.empty)( definitions )
+		apply(Set.empty, Set.empty, Set.empty)( definitions )
 
 	def findAnnotations(as: Seq[Annotation], pred: String => Boolean): Set[String] =
 		as.flatMap { a => simpleName(a.base).filter(pred) }.toSet

@@ -11,14 +11,14 @@ package sbt
 	import xsbti.api.Definition
 	import ConcurrentRestrictions.Tag
 
-	import org.scalasbt.testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint}
+	import org.scalasbt.testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint, DoNotDiscoverFingerprint, Runner}
 
 	import java.io.File
 
 sealed trait TestOption
 object Tests
 {
-	// (overall result, individual results)
+	// (overall result, individual results, show summary)
 	type Output = (TestResult.Value, Map[String,TestResult.Value])
 	
 	final case class Setup(setup: ClassLoader => Unit) extends TestOption
@@ -43,7 +43,7 @@ object Tests
 
 	final case class Execution(options: Seq[TestOption], parallel: Boolean, tags: Seq[(Tag, Int)])
 
-	def apply(frameworks: Map[TestFramework, Framework], testLoader: ClassLoader, discovered: Seq[TestDefinition], config: Execution, log: Logger): Task[Output] =
+	def apply(frameworks: Map[TestFramework, Framework], testLoader: ClassLoader, runners: Map[TestFramework, Runner], discovered: Seq[TestDefinition], config: Execution, log: Logger): Task[Output] =
 	{
 			import collection.mutable.{HashSet, ListBuffer, Map, Set}
 		val testFilters = new ListBuffer[String => Boolean]
@@ -58,7 +58,7 @@ object Tests
 		def frameworkArguments(framework: TestFramework, args: Seq[String]): Unit =
 			(frameworks get framework) match {
 				case Some(f) => frameworkArgs(f, args)
-				case None => undefinedFrameworks += framework.implClassName
+				case None => undefinedFrameworks ++= framework.implClassNames
 			}
 
 		for(option <- config.options)
@@ -94,10 +94,10 @@ object Tests
 		val filtered0 = discovered.filter(includeTest).toList.distinct
 		val tests = if(orderedFilters.isEmpty) filtered0 else orderedFilters.flatMap(f => filtered0.filter(d => f(d.name))).toList.distinct
 		val arguments = testArgsByFramework.map { case (k,v) => (k, v.toList) } toMap;
-		testTask(frameworks.values.toSeq, testLoader, tests, setup.readOnly, cleanup.readOnly, log, testListeners.readOnly, arguments, config)
+		testTask(testLoader, frameworks, runners, tests, setup.readOnly, cleanup.readOnly, log, testListeners.readOnly, arguments, config)
 	}
 
-	def testTask(frameworks: Seq[Framework], loader: ClassLoader, tests: Seq[TestDefinition],
+	def testTask(loader: ClassLoader, frameworks: Map[TestFramework, Framework], runners: Map[TestFramework, Runner], tests: Seq[TestDefinition],
 		userSetup: Iterable[ClassLoader => Unit], userCleanup: Iterable[ClassLoader => Unit],
 		log: Logger, testListeners: Seq[TestReportListener], arguments: Map[Framework, Seq[String]], config: Execution): Task[Output] =
 	{
@@ -105,7 +105,7 @@ object Tests
 		def partApp(actions: Iterable[ClassLoader => Unit]) = actions.toSeq map {a => () => a(loader) }
 
 		val (frameworkSetup, runnables, frameworkCleanup) =
-			TestFramework.testTasks(frameworks, loader, tests, log, testListeners, arguments)
+			TestFramework.testTasks(frameworks, runners, loader, tests, log, testListeners, arguments)
 
 		val setupTasks = fj(partApp(userSetup) :+ frameworkSetup)
 		val mainTasks =
@@ -152,6 +152,7 @@ object Tests
 	{
 		val subclasses = fingerprints collect { case sub: SubclassFingerprint => (sub.superclassName, sub.isModule, sub) };
 		val annotations = fingerprints collect { case ann: AnnotatedFingerprint => (ann.annotationName, ann.isModule, ann) };
+		val doNotDiscoverAnnotations = fingerprints collect { case ann: DoNotDiscoverFingerprint => ann.annotationName };
 		log.debug("Subclass fingerprints: " + subclasses)
 		log.debug("Annotation fingerprints: " + annotations)
 
@@ -163,8 +164,10 @@ object Tests
 			defined(subclasses, d.baseClasses, d.isModule) ++
 			defined(annotations, d.annotations, d.isModule)
 
-		val discovered = Discovery(firsts(subclasses), firsts(annotations))(definitions)
-		val tests = for( (df, di) <- discovered; fingerprint <- toFingerprints(di) ) yield new TestDefinition(df.name, fingerprint)
+		val discovered = Discovery(firsts(subclasses), firsts(annotations), doNotDiscoverAnnotations.toSet)(definitions)
+		val tests = for( (df, di) <- discovered; 
+		                 if (!di.doNotDiscover);
+		                 fingerprint <- toFingerprints(di) ) yield new TestDefinition(df.name, fingerprint)
 		val mains = discovered collect { case (df, di) if di.hasMain => df.name }
 		(tests, mains.toSet)
 	}

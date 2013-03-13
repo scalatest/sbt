@@ -585,9 +585,9 @@ object Load
 	def discover(analysis: inc.Analysis, subclasses: String*): Seq[String] =
 	{
 		val subclassSet = subclasses.toSet
-		val ds = Discovery(subclassSet, Set.empty)(Tests.allDefs(analysis))
+		val ds = Discovery(subclassSet, Set.empty, Set.empty)(Tests.allDefs(analysis))
 		ds.flatMap {
-			case (definition, Discovered(subs,_,_,true)) =>
+			case (definition, Discovered(subs,_,_,true,_)) =>
 				if((subs & subclassSet).isEmpty) Nil else definition.name :: Nil
 			case _ => Nil
 		}

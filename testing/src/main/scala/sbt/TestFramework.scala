@@ -9,6 +9,7 @@ package sbt
     import org.scalasbt.testing.{Event, EventHandler, Framework, Runner, Logger=>TLogger}
     import org.scalatools.testing.{Framework => OldFramework}
 	import classpath.{ClasspathUtilities, DualLoader, FilteredLoader}
+	import scala.annotation.tailrec
 
 object TestResult extends Enumeration
 {
@@ -18,30 +19,38 @@ object TestResult extends Enumeration
 object TestFrameworks
 {
 	val ScalaCheck = new TestFramework("org.scalacheck.ScalaCheckFramework")
-	val ScalaTest = new TestFramework("org.scalatest.tools.ScalaTestFramework")
+	val ScalaTest = new TestFramework("org.scalatest.tools.ScalaTestNewFramework", "org.scalatest.tools.ScalaTestFramework")
 	val Specs = new TestFramework("org.specs.runner.SpecsFramework")
 	val Specs2 = new TestFramework("org.specs2.runner.SpecsFramework")
 	val JUnit = new TestFramework("com.novocode.junit.JUnitFramework")
 }
 
-case class TestFramework(val implClassName: String)
+case class TestFramework(val implClassNames: String*)
 {
+    @tailrec
+    private def createFramework(loader: ClassLoader, log: Logger, frameworkClassNames: List[String]): Option[Framework] = {
+        frameworkClassNames match {
+          case head :: tail => 
+            try 
+            {
+                Some(Class.forName(head, true, loader).newInstance match {
+		            case newFramework: Framework => newFramework
+		            case oldFramework: OldFramework => new FrameworkWrapper(oldFramework)
+		        })
+            }
+            catch 
+	        { 
+                case e: ClassNotFoundException => 
+                  log.debug("Framework implementation '" + head + "' not present."); 
+                  createFramework(loader, log, tail)
+            }
+          case Nil => 
+            None
+        }
+    }
+  
 	def create(loader: ClassLoader, log: Logger): Option[Framework] =
-	{
-		try 
-		{ 
-		    Some(
-		        Class.forName(implClassName, true, loader).newInstance match {
-		          case newFramework: Framework => newFramework
-		          case oldFramework: OldFramework => new FrameworkWrapper(oldFramework)
-		        } 
-		    )
-		}
-		catch 
-		{ 
-		    case e: ClassNotFoundException => log.debug("Framework implementation '" + implClassName + "' not present."); None 
-		}
-	}
+	    createFramework(loader, log, implClassNames.toList)
 }
 final class TestDefinition(val name: String, val fingerprint: Fingerprint)
 {
@@ -55,8 +64,7 @@ final class TestDefinition(val name: String, val fingerprint: Fingerprint)
 	override def hashCode: Int = (name.hashCode, TestFramework.hashCode(fingerprint)).hashCode
 }
 
-final class TestRunner(framework: Framework, loader: ClassLoader, args: Array[String], listeners: Seq[TestReportListener], log: Logger) {
-    val delegate = framework.runner(args, loader)
+final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log: Logger) {
     
     final def run(testDefinition: TestDefinition): TestResult.Value =
 	{
@@ -122,7 +130,6 @@ object TestFramework
 		{
 			case (a: SubclassFingerprint, b: SubclassFingerprint) => a.isModule == b.isModule && a.superclassName == b.superclassName
 			case (a: AnnotatedFingerprint, b: AnnotatedFingerprint) => a.isModule == b.isModule && a.annotationName == b.annotationName
-			case (a: DoNotDiscoverFingerprint, b: DoNotDiscoverFingerprint) => !(a.annotationName == b.annotationName)
 			case _ => false
 		}
 	def toString(f: Fingerprint): String =
@@ -134,8 +141,9 @@ object TestFramework
 			case _ => f.toString
 		}
 
-	def testTasks(frameworks: Seq[Framework],
-		testLoader: ClassLoader,
+	def testTasks(frameworks: Map[TestFramework, Framework],
+	    runners: Map[TestFramework, Runner], 
+	    testLoader: ClassLoader,
 		tests: Seq[TestDefinition],
 		log: Logger,
 		listeners: Seq[TestReportListener],
@@ -143,11 +151,11 @@ object TestFramework
 			(() => Unit, Seq[(String, () => TestResult.Value)], TestResult.Value => () => Unit) =
 	{
 		val arguments = testArgsByFramework withDefaultValue Nil
-		val mappedTests = testMap(frameworks, tests, arguments)
+		val mappedTests = testMap(frameworks.values.toSeq, tests, arguments)
 		if(mappedTests.isEmpty)
 			(() => (), Nil, _ => () => () )
 		else
-			createTestTasks(testLoader, mappedTests, tests, log, listeners)
+			createTestTasks(testLoader, runners.map { case (tf, r) => (frameworks(tf), new TestRunner(r, listeners, log))}, mappedTests, tests, log, listeners)
 	}
 
 	private[this] def order(mapped: Map[String, () => TestResult.Value], inputs: Seq[TestDefinition]): Seq[(String, () => TestResult.Value)] =
@@ -182,9 +190,10 @@ object TestFramework
 		uniqueDefs.toSet
 	}
 		
-	private def createTestTasks(loader: ClassLoader, tests: Map[Framework, (Set[TestDefinition], Seq[String])], ordered: Seq[TestDefinition], log: Logger, listeners: Seq[TestReportListener]) =
+	private def createTestTasks(loader: ClassLoader, runners: Map[Framework, TestRunner], tests: Map[Framework, (Set[TestDefinition], Seq[String])], ordered: Seq[TestDefinition], log: Logger, listeners: Seq[TestReportListener]) =
 	{
 		val testsListeners = listeners collect { case tl: TestsListener => tl }
+		
 		def foreachListenerSafe(f: TestsListener => Unit): () => Unit = () => safeForeach(testsListeners, log)(f)
 		
 			import TestResult.{Error,Passed,Failed}
@@ -192,16 +201,18 @@ object TestFramework
 		val startTask = foreachListenerSafe(_.doInit)
 		val testTasks =
 			tests flatMap { case (framework, (testDefinitions, testArgs)) =>
-			
-					val runner = new TestRunner(framework, loader, testArgs.toArray, listeners, log)
-					for(testDefinition <- testDefinitions) yield
-					{
-						val runTest = () => withContextLoader(loader) { runner.run(testDefinition) }
-						(testDefinition.name, runTest)
-					}
+			    val runner = runners(framework)
+			    for(testDefinition <- testDefinitions) yield
+			    {
+				    val runTest = () => withContextLoader(loader) { runner.run(testDefinition) }
+				    (testDefinition.name, runTest)
+			    }
 			}
 
-		val endTask = (result: TestResult.Value) => foreachListenerSafe(_.doComplete(result))
+		val endTask = (result: TestResult.Value) => {
+		  foreachListenerSafe(_.doComplete(result))
+		}
+		
 		(startTask, order(testTasks, ordered), endTask)
 	}
 	private[this] def withContextLoader[T](loader: ClassLoader)(eval: => T): T =
