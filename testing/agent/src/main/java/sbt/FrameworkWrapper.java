@@ -30,7 +30,7 @@ public class FrameworkWrapper implements Framework {
 		return fingerprints;
 	}
 	
-	public Runner runner(String[] args, ClassLoader testClassLoader) {
+	public Runner runner(String[] args, String[] remoteArgs, ClassLoader testClassLoader) {
 		return new RunnerWrapper(oldFramework, testClassLoader, args);
 	}
 }
@@ -220,5 +220,13 @@ class RunnerWrapper implements Runner {
 	    
     public boolean done() {
     	return false;
+    }
+    
+    public String[] args() {
+        return args;
+    }
+    
+    public String[] remoteArgs() {
+        return new String[0];  // Old framework does not support remoteArgs
     }
 }
