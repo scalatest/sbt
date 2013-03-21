@@ -9,6 +9,7 @@ package sbt
     import org.scalasbt.testing.{Event, EventHandler, Framework, Runner, Logger=>TLogger}
     import org.scalatools.testing.{Framework => OldFramework}
 	import classpath.{ClasspathUtilities, DualLoader, FilteredLoader}
+	import scala.annotation.tailrec
 
 object TestResult extends Enumeration
 {
@@ -18,17 +19,58 @@ object TestResult extends Enumeration
 object TestFrameworks
 {
 	val ScalaCheck = new TestFramework("org.scalacheck.ScalaCheckFramework")
-	val ScalaTest = new TestFramework("org.scalatest.tools.ScalaTestFramework")
+	val ScalaTest = new TestFramework("org.scalatest.tools.ScalaTestNewFramework", "org.scalatest.tools.ScalaTestFramework")
 	val Specs = new TestFramework("org.specs.runner.SpecsFramework")
 	val Specs2 = new TestFramework("org.specs2.runner.SpecsFramework")
 	val JUnit = new TestFramework("com.novocode.junit.JUnitFramework")
 }
 
-case class TestFramework(val implClassName: String)
+case class TestFramework(val implClassNames: String*)
 {
+    @tailrec
+    private def createFramework(loader: ClassLoader, log: Logger, frameworkClassNames: List[String]): Option[Framework] = {
+        frameworkClassNames match {
+          case head :: tail => 
+            try 
+            {
+                Some(Class.forName(head, true, loader).newInstance match {
+		            case newFramework: Framework => newFramework
+		            case oldFramework: OldFramework => new FrameworkWrapper(oldFramework)
+		        })
+            }
+            catch 
+	        { 
+                case e: ClassNotFoundException => 
+                  log.debug("Framework implementation '" + head + "' not present."); 
+                  createFramework(loader, log, tail)
+            }
+          case Nil => 
+            None
+        }
+        /*val implClassName = frameworkClassNames.head
+        try 
+        {
+            Some(Class.forName(implClassName, true, loader).newInstance match {
+		        case newFramework: Framework => newFramework
+		        case oldFramework: OldFramework => new FrameworkWrapper(oldFramework)
+		    })
+        }
+        catch 
+	    { 
+            case e: ClassNotFoundException => 
+              log.debug("Framework implementation '" + implClassName + "' not present."); 
+              val tail = frameworkClassNames.tail
+              if (tail.size > 0)
+                createFramework(loader, log, tail)
+              else
+                None 
+        }*/
+    }
+  
 	def create(loader: ClassLoader, log: Logger): Option[Framework] =
 	{
-		try 
+	    createFramework(loader, log, implClassNames.toList)
+		/*try 
 		{ 
 		    Some(
 		        Class.forName(implClassName, true, loader).newInstance match {
@@ -40,7 +82,7 @@ case class TestFramework(val implClassName: String)
 		catch 
 		{ 
 		    case e: ClassNotFoundException => log.debug("Framework implementation '" + implClassName + "' not present."); None 
-		}
+		}*/
 	}
 }
 final class TestDefinition(val name: String, val fingerprint: Fingerprint)
