@@ -47,43 +47,10 @@ case class TestFramework(val implClassNames: String*)
           case Nil => 
             None
         }
-        /*val implClassName = frameworkClassNames.head
-        try 
-        {
-            Some(Class.forName(implClassName, true, loader).newInstance match {
-		        case newFramework: Framework => newFramework
-		        case oldFramework: OldFramework => new FrameworkWrapper(oldFramework)
-		    })
-        }
-        catch 
-	    { 
-            case e: ClassNotFoundException => 
-              log.debug("Framework implementation '" + implClassName + "' not present."); 
-              val tail = frameworkClassNames.tail
-              if (tail.size > 0)
-                createFramework(loader, log, tail)
-              else
-                None 
-        }*/
     }
   
 	def create(loader: ClassLoader, log: Logger): Option[Framework] =
-	{
 	    createFramework(loader, log, implClassNames.toList)
-		/*try 
-		{ 
-		    Some(
-		        Class.forName(implClassName, true, loader).newInstance match {
-		          case newFramework: Framework => newFramework
-		          case oldFramework: OldFramework => new FrameworkWrapper(oldFramework)
-		        } 
-		    )
-		}
-		catch 
-		{ 
-		    case e: ClassNotFoundException => log.debug("Framework implementation '" + implClassName + "' not present."); None 
-		}*/
-	}
 }
 final class TestDefinition(val name: String, val fingerprint: Fingerprint)
 {
