@@ -19,7 +19,7 @@ object TestResult extends Enumeration
 object TestFrameworks
 {
 	val ScalaCheck = new TestFramework("org.scalacheck.ScalaCheckFramework")
-	val ScalaTest = new TestFramework("org.scalatest.tools.ScalaTestNewFramework", "org.scalatest.tools.ScalaTestFramework")
+	val ScalaTest = new TestFramework("org.scalatest.tools.Framework", "org.scalatest.tools.ScalaTestFramework")
 	val Specs = new TestFramework("org.specs.runner.SpecsFramework")
 	val Specs2 = new TestFramework("org.specs2.runner.SpecsFramework")
 	val JUnit = new TestFramework("com.novocode.junit.JUnitFramework")
@@ -76,7 +76,7 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
 			val results = new scala.collection.mutable.ListBuffer[Event]
 			val handler = new EventHandler { def handle(e:Event){ results += e } }
 			val loggers = listeners.flatMap(_.contentLogger(testDefinition))
-			try delegate.task(testDefinition.name, testDefinition.fingerprint, handler, loggers.map(_.log).toArray).execute()
+			try delegate.task(testDefinition.name, testDefinition.fingerprint).execute(handler, loggers.map(_.log).toArray)
 		    finally loggers.foreach( _.flush() ) 
 			val event = TestEvent(results)
 			safeListenersCall(_.testEvent( event ))

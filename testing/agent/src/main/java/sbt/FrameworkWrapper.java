@@ -154,13 +154,13 @@ class RunnerWrapper implements Runner {
         this.args = args;
 	}
 	  
-    public Task task(final String fullyQualifiedName, final Fingerprint fingerprint, final EventHandler eventHandler, final Logger[] loggers) {
+    public Task task(final String fullyQualifiedName, final Fingerprint fingerprint) {
       return new Task() {
         public String[] tags() {
         	return new String[0];  // Old framework does not support tags
         }
         
-        public Task[] execute() {          
+        public Task[] execute(final EventHandler eventHandler, final Logger[] loggers) {          
           int length = loggers.length;
           org.scalatools.testing.Logger[] oldLoggers = new org.scalatools.testing.Logger[length];
           for (int i=0; i<length; i++) {
@@ -214,12 +214,12 @@ class RunnerWrapper implements Runner {
       };
     }
 	    
-    public Task task(String fullyQualifiedName, boolean isModule, Selector[] selectors, EventHandler eventHandler, Logger[] loggers) {
+    public Task task(String fullyQualifiedName, boolean isModule, Selector[] selectors) {
         throw new UnsupportedOperationException("Old framework does not support selector.");
     }
 	    
-    public boolean done() {
-    	return false;
+    public String[] done() {
+    	return new String[0];
     }
     
     public String[] args() {
