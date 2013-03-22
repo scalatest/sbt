@@ -19,7 +19,7 @@ object TestResult extends Enumeration
 object TestFrameworks
 {
 	val ScalaCheck = new TestFramework("org.scalacheck.ScalaCheckFramework")
-	val ScalaTest = new TestFramework("org.scalatest.tools.ScalaTestNewFramework", "org.scalatest.tools.ScalaTestFramework")
+	val ScalaTest = new TestFramework("org.scalatest.tools.Framework", "org.scalatest.tools.ScalaTestFramework")
 	val Specs = new TestFramework("org.specs.runner.SpecsFramework")
 	val Specs2 = new TestFramework("org.specs2.runner.SpecsFramework")
 	val JUnit = new TestFramework("com.novocode.junit.JUnitFramework")
