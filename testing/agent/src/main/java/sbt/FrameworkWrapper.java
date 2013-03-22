@@ -218,8 +218,8 @@ class RunnerWrapper implements Runner {
         throw new UnsupportedOperationException("Old framework does not support selector.");
     }
 	    
-    public boolean done() {
-    	return false;
+    public String[] done() {
+    	return new String[0];
     }
     
     public String[] args() {
