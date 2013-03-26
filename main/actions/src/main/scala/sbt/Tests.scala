@@ -193,11 +193,7 @@ object Tests
 		val useSummaryFromFramework = firstSummary.isDefined && !iterator.hasNext
 
 		if (useSummaryFromFramework) {
-			results._1 match {
-				case TestResult.Error => firstSummary.get.foreach(log.error(_))
-				case TestResult.Passed => firstSummary.get.foreach(log.info(_))
-				case TestResult.Failed => firstSummary.get.foreach(log.error(_))
-			}
+			firstSummary.get.foreach(log.info(_))
 		}
 		else {  
 			val (skippedCount, errorsCount, passedCount, failuresCount) = resultCounter.getCounts
