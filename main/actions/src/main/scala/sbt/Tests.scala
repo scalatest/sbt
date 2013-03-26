@@ -177,26 +177,51 @@ object Tests
 	}
 
 	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String, resultCounter: TestResultCounter, 
-	                summaries: Iterable[Array[String]]): Unit =
+	                summaries: Iterable[(String, Array[String])]): Unit =
 	{
 	    val iterator = summaries.iterator
 	    val firstSummary = 
-	      if (iterator.hasNext) {
-	        val first = iterator.next
-	        if (first.isEmpty)
-	          None
-	        else
-	          Some(first)
-	      }
+	      if (iterator.hasNext) 
+	        Some(iterator.next)
+	      else
+	        None
+	    
+	    val secondSummary = 
+	      if (iterator.hasNext) 
+	        Some(iterator.next)
 	      else
 	        None
 	        
-	    val useSummaryFromFramework = firstSummary.isDefined && !iterator.hasNext
-	  
-	    if (useSummaryFromFramework) {
-        firstSummary.get.foreach(log.info(_))
-      }
-	    else {  
+	    // print framework name when there is > 1 framework
+	    val printFrameworkName = firstSummary.isDefined && secondSummary.isDefined
+	    
+	    def printSummary(name: String, messages: Array[String]) {
+	        if (printFrameworkName)
+	            log.info(name)
+	        if (messages.size > 0)
+	          messages.foreach(log.info(_))
+	        else
+	          log.info("Summary for " + name + " not available.")
+	    }
+	    
+	    firstSummary match {
+	      case Some((name, messages)) => printSummary(name, messages)
+	      case None => // Do nothing
+	    }
+	    
+	    secondSummary match {
+	      case Some((name, messages)) => printSummary(name, messages)
+	      case None => // Do nothing
+	    }
+	    
+	    while (iterator.hasNext) {
+	        val (name, messages) = iterator.next
+	        printSummary(name, messages)
+	    }
+	    
+	    // Print the standard one-liner statistic if no framework summary is defined, or when > 1 framework is in used.
+	    if ((firstSummary.isDefined && !(firstSummary.get._2.size > 0) && !secondSummary.isDefined) || (firstSummary.isDefined && secondSummary.isDefined)) 
+	    {
 	        val (skippedCount, errorsCount, passedCount, failuresCount) = resultCounter.getCounts
 	        val totalCount = failuresCount + errorsCount + skippedCount + passedCount
             val postfix = "Total " + totalCount + ", Failed " + failuresCount + ", Errors " + errorsCount + ", Passed " + passedCount + ", Skipped " + skippedCount
@@ -205,30 +230,31 @@ object Tests
                 case TestResult.Passed => log.info("Passed: " + postfix)
                 case TestResult.Failed => log.error("Failed: " + postfix)
             }
-	  
-		    if (results._2.isEmpty)
-			    log.info(noTestsMessage)
-		    else {
-			    import TestResult.{Error, Failed, Passed}
-
-			    def select(Tpe: TestResult.Value) = results._2 collect { case (name, Tpe) => name }
-
-			    val failures = select(Failed)
-			    val errors = select(Error)
-			    val passed = select(Passed)
-
-			    def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
-				    if(!tests.isEmpty)
-					    {
-						    log.log(level, label)
-						    log.log(level, tests.mkString("\t", "\n\t", ""))
-					    }
-
-			    show("Passed tests:", Level.Debug, passed )
-			    show("Failed tests:", Level.Error, failures)
-			    show("Error during tests:", Level.Error, errors)
-		    }
 	    }
+	    
+	    // Let's always print out Failed tests for now
+	    if (results._2.isEmpty)
+	        log.info(noTestsMessage)
+		else {
+			import TestResult.{Error, Failed, Passed}
+
+			def select(Tpe: TestResult.Value) = results._2 collect { case (name, Tpe) => name }
+
+			val failures = select(Failed)
+			val errors = select(Error)
+			val passed = select(Passed)
+
+			def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
+			    if(!tests.isEmpty)
+				{
+				    log.log(level, label)
+					log.log(level, tests.mkString("\t", "\n\t", ""))
+			    }
+
+			show("Passed tests:", Level.Debug, passed )
+			show("Failed tests:", Level.Error, failures)
+			show("Error during tests:", Level.Error, errors)
+		}
 	    
 	    results._1 match {
             case TestResult.Error => throw new TestsFailedException

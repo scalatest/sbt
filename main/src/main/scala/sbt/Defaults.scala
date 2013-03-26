@@ -354,7 +354,7 @@ object Defaults extends BuildCommon
 			implicit val display = Project.showContextKey(state.value)
 			val summaries = 
 			  testRunners.value map { case (tf, r) =>
-			    r.done()
+			    (loadedTestFrameworks.value.apply(tf).name, r.done())
 			  }
 			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value), testResultCounter.value, summaries)
 		},
@@ -456,7 +456,7 @@ object Defaults extends BuildCommon
 				for(out <- groupsTask) yield {
 				    val summaries = 
 			            testRunners.value map { case (tf, r) =>
-			                r.done()
+			                (loadedTestFrameworks.value.apply(tf).name, r.done())
 			            }
 				    Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value), testResultCounter.value, summaries)
 				}
