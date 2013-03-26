@@ -76,7 +76,7 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
 			val results = new scala.collection.mutable.ListBuffer[Event]
 			val handler = new EventHandler { def handle(e:Event){ results += e } }
 			val loggers = listeners.flatMap(_.contentLogger(testDefinition))
-			try delegate.task(testDefinition.name, testDefinition.fingerprint, handler, loggers.map(_.log).toArray).execute()
+			try delegate.task(testDefinition.name, testDefinition.fingerprint).execute(handler, loggers.map(_.log).toArray)
 		    finally loggers.foreach( _.flush() ) 
 			val event = TestEvent(results)
 			safeListenersCall(_.testEvent( event ))

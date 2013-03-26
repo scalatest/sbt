@@ -172,7 +172,7 @@ public class ForkMain {
 		ForkEvent[] runTest(ForkTestDefinition test, Runner runner, Logger[] loggers, ObjectOutputStream os) {
 			final List<ForkEvent> events = new ArrayList<ForkEvent>();
 			EventHandler handler = new EventHandler() { public void handle(Event e){ events.add(new ForkEvent(e)); } };
-			runner.task(test.name, test.fingerprint, handler, loggers).execute();
+			runner.task(test.name, test.fingerprint).execute(handler, loggers);
 			return events.toArray(new ForkEvent[events.size()]);
 		}
 		void run(ObjectInputStream is, ObjectOutputStream os) throws Exception {
