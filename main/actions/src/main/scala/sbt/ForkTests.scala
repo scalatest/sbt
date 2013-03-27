@@ -4,19 +4,19 @@
 package sbt
 
 import scala.collection.mutable
-import org.scalatools.testing._
+import org.scalasbt.testing._
 import java.net.ServerSocket
 import java.io._
 import Tests.{Output => TestOutput, _}
 import ForkMain._
 
 private[sbt] object ForkTests {
-	def apply(frameworks: Seq[TestFramework], tests: List[TestDefinition], config: Execution, classpath: Seq[File], fork: ForkOptions, log: Logger): Task[TestOutput]  = {
+	def apply(runners: Map[TestFramework, Runner],  tests: List[TestDefinition], config: Execution, classpath: Seq[File], fork: ForkOptions, log: Logger, resultCounter: TestResultCounter): Task[TestOutput]  = {
 		val opts = config.options.toList
-		val listeners = opts flatMap {
+		val listeners = resultCounter :: (opts flatMap {
 			case Listeners(ls) => ls
 			case _ => Nil
-		}
+		})
 		val testListeners = listeners flatMap {
 			case tl: TestsListener => Some(tl)
 			case _ => None
@@ -25,12 +25,6 @@ private[sbt] object ForkTests {
 			case Filter(f) => Some(f)
 			case _ => None
 		}
-		val argMap = frameworks.map {
-			f => f.implClassName -> opts.flatMap {
-				case Argument(None | Some(`f`), args) => args
-				case _ => Nil
-			}
-		}.toMap
 
 		std.TaskExtra.task {
 			if (!tests.isEmpty) {
@@ -56,15 +50,18 @@ private[sbt] object ForkTests {
 							}.toArray
 							os.writeObject(testsFiltered)
 
-							os.writeInt(frameworks.size)
-							for ((clazz, args) <- argMap) {
-								os.writeObject(clazz)
-								os.writeObject(args.toArray)
+							os.writeInt(runners.size)
+							for ((testFramework, mainRunner) <- runners) {
+								val remoteArgs = mainRunner.remoteArgs()
+								os.writeObject(testFramework.implClassNames.toArray)
+								os.writeObject(mainRunner.args)
+								os.writeObject(if (remoteArgs == null) Array.empty[String] else remoteArgs)
 							}
 							os.flush()
 
 							(new React(is, os, log, listeners, resultsAcc)).react()
-						} finally {
+						} 
+						finally {
 							is.close();	os.close(); socket.close()
 						}
 					}
@@ -72,7 +69,8 @@ private[sbt] object ForkTests {
 
 				try {
 					testListeners.foreach(_.doInit())
-					new Thread(Acceptor).start()
+					val acceptorThread = new Thread(Acceptor)
+					acceptorThread.start()
 
 					val fullCp = classpath ++: Seq(IO.classLocationFile[ForkMain], IO.classLocationFile[Framework])
 					val options = Seq("-classpath", fullCp mkString File.pathSeparator, classOf[ForkMain].getCanonicalName, server.getLocalPort.toString)
@@ -80,8 +78,13 @@ private[sbt] object ForkTests {
 					val result =
 						if (ec != 0)
 							(TestResult.Error, Map("Running java with options " + options.mkString(" ") + " failed with exit code " + ec -> TestResult.Error))
-						else
+						else {
+							// Need to wait acceptor thread to finish its business
+							while (acceptorThread.isAlive)
+								Thread.sleep(10)
 							Acceptor.result
+						}
+					
 					testListeners.foreach(_.doComplete(result._1))
 					result
 				} finally {
@@ -102,7 +105,7 @@ private final class React(is: ObjectInputStream, os: ObjectOutputStream, log: Lo
 		case Array(`Info`, s: String) => log.info(s); react()
 		case Array(`Debug`, s: String) => log.debug(s); react()
 		case t: Throwable => log.trace(t); react()
-		case Array(group: String, tEvents: Array[Event]) =>
+		case Array(group: String, tEvents: Array[ForkEvent]) =>
 			listeners.foreach(_ startGroup group)
 			val event = TestEvent(tEvents)
 			listeners.foreach(_ testEvent event)

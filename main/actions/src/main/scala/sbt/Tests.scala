@@ -11,7 +11,7 @@ package sbt
 	import xsbti.api.Definition
 	import ConcurrentRestrictions.Tag
 
-	import org.scalatools.testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint}
+	import org.scalasbt.testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint, DoNotDiscoverFingerprint, Runner, Task => TestTask}
 
 	import java.io.File
 
@@ -43,7 +43,8 @@ object Tests
 
 	final case class Execution(options: Seq[TestOption], parallel: Boolean, tags: Seq[(Tag, Int)])
 
-	def apply(frameworks: Map[TestFramework, Framework], testLoader: ClassLoader, discovered: Seq[TestDefinition], config: Execution, log: Logger): Task[Output] =
+	def apply(frameworks: Map[TestFramework, Framework], testLoader: ClassLoader, runners: Map[TestFramework, Runner], discovered: Seq[TestDefinition], 
+			config: Execution, log: Logger, resultCounter: TestResultCounter): Task[Output] =
 	{
 			import collection.mutable.{HashSet, ListBuffer, Map, Set}
 		val testFilters = new ListBuffer[String => Boolean]
@@ -58,9 +59,11 @@ object Tests
 		def frameworkArguments(framework: TestFramework, args: Seq[String]): Unit =
 			(frameworks get framework) match {
 				case Some(f) => frameworkArgs(f, args)
-				case None => undefinedFrameworks += framework.implClassName
+				case None => undefinedFrameworks ++= framework.implClassNames
 			}
 
+		testListeners += resultCounter
+		
 		for(option <- config.options)
 		{
 			option match
@@ -94,10 +97,10 @@ object Tests
 		val filtered0 = discovered.filter(includeTest).toList.distinct
 		val tests = if(orderedFilters.isEmpty) filtered0 else orderedFilters.flatMap(f => filtered0.filter(d => f(d.name))).toList.distinct
 		val arguments = testArgsByFramework.map { case (k,v) => (k, v.toList) } toMap;
-		testTask(frameworks.values.toSeq, testLoader, tests, setup.readOnly, cleanup.readOnly, log, testListeners.readOnly, arguments, config)
+		testTask(testLoader, frameworks, runners, tests, setup.readOnly, cleanup.readOnly, log, testListeners.readOnly, arguments, config)
 	}
 
-	def testTask(frameworks: Seq[Framework], loader: ClassLoader, tests: Seq[TestDefinition],
+	def testTask(loader: ClassLoader, frameworks: Map[TestFramework, Framework], runners: Map[TestFramework, Runner], tests: Seq[TestDefinition],
 		userSetup: Iterable[ClassLoader => Unit], userCleanup: Iterable[ClassLoader => Unit],
 		log: Logger, testListeners: Seq[TestReportListener], arguments: Map[Framework, Seq[String]], config: Execution): Task[Output] =
 	{
@@ -105,7 +108,7 @@ object Tests
 		def partApp(actions: Iterable[ClassLoader => Unit]) = actions.toSeq map {a => () => a(loader) }
 
 		val (frameworkSetup, runnables, frameworkCleanup) =
-			TestFramework.testTasks(frameworks, loader, tests, log, testListeners, arguments)
+			TestFramework.testTasks(frameworks, runners, loader, tests, log, testListeners, arguments)
 
 		val setupTasks = fj(partApp(userSetup) :+ frameworkSetup)
 		val mainTasks =
@@ -119,15 +122,16 @@ object Tests
 			cleanupTasks map { _ => results }
 		}
 	}
-	type TestRunnable = (String, () => TestResult.Value)
+	type TestRunnable = (String, TestFunction)
 	def makeParallel(runnables: Iterable[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) =
-		runnables map { case (name, test) => task { (name, test()) } tagw(tags : _*) dependsOn setupTasks named name }
+		runnables map { case (name, test) => task { (name, test()) } tagw(tags : _*) tag(test.tags map (ConcurrentRestrictions.Tag(_)) : _*) dependsOn setupTasks named name  }
+
 	def makeSerial(runnables: Seq[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) =
 		task { runnables map { case (name, test) => (name, test()) } } dependsOn(setupTasks)
 
 	def processResults(results: Iterable[(String, TestResult.Value)]): (TestResult.Value, Map[String, TestResult.Value]) =
 		(overall(results.map(_._2)), results.toMap)
-	def foldTasks(results: Seq[Task[Output]], parallel: Boolean): Task[Output] =
+	def foldTasks(results: Seq[Task[Output]], parallel: Boolean): Task[Output] = 
 		if (parallel)
 			reduced(results.toIndexedSeq, {
 				case ((v1, m1), (v2, m2)) => (if (v1.id < v2.id) v2 else v1, m1 ++ m2)
@@ -142,16 +146,18 @@ object Tests
 				(overall(rs), ms reduce (_ ++ _))
 			}
 		}
+
 	def overall(results: Iterable[TestResult.Value]): TestResult.Value =
 		(TestResult.Passed /: results) { (acc, result) => if(acc.id < result.id) result else acc }
 	def discover(frameworks: Seq[Framework], analysis: Analysis, log: Logger): (Seq[TestDefinition], Set[String]) =
-		discover(frameworks flatMap TestFramework.getTests, allDefs(analysis), log)
+		discover(frameworks flatMap TestFramework.getFingerprints, allDefs(analysis), log)
 
 	def allDefs(analysis: Analysis) = analysis.apis.internal.values.flatMap(_.api.definitions).toSeq
 	def discover(fingerprints: Seq[Fingerprint], definitions: Seq[Definition], log: Logger): (Seq[TestDefinition], Set[String]) =
 	{
-		val subclasses = fingerprints collect { case sub: SubclassFingerprint => (sub.superClassName, sub.isModule, sub) };
+		val subclasses = fingerprints collect { case sub: SubclassFingerprint => (sub.superclassName, sub.isModule, sub) };
 		val annotations = fingerprints collect { case ann: AnnotatedFingerprint => (ann.annotationName, ann.isModule, ann) };
+		val doNotDiscoverAnnotations = fingerprints collect { case ann: DoNotDiscoverFingerprint => ann.annotationName };
 		log.debug("Subclass fingerprints: " + subclasses)
 		log.debug("Annotation fingerprints: " + annotations)
 
@@ -163,14 +169,71 @@ object Tests
 			defined(subclasses, d.baseClasses, d.isModule) ++
 			defined(annotations, d.annotations, d.isModule)
 
-		val discovered = Discovery(firsts(subclasses), firsts(annotations))(definitions)
-		val tests = for( (df, di) <- discovered; fingerprint <- toFingerprints(di) ) yield new TestDefinition(df.name, fingerprint)
+		val discovered = Discovery(firsts(subclasses), firsts(annotations), doNotDiscoverAnnotations.toSet)(definitions)
+		val tests = for((df, di) <- discovered; 
+						if (!di.doNotDiscover);
+						fingerprint <- toFingerprints(di) ) yield new TestDefinition(df.name, fingerprint)
 		val mains = discovered collect { case (df, di) if di.hasMain => df.name }
 		(tests, mains.toSet)
 	}
 
-	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String): Unit =
+	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String, resultCounter: TestResultCounter, 
+					summaries: Iterable[(String, Array[String])]): Unit =
 	{
+		val iterator = summaries.iterator
+		val firstSummary = 
+			if (iterator.hasNext) 
+				Some(iterator.next)
+			else
+				None
+
+		val secondSummary = 
+			if (iterator.hasNext) 
+				Some(iterator.next)
+			else
+				None
+
+		// print framework name when there is > 1 framework
+		val printFrameworkName = firstSummary.isDefined && secondSummary.isDefined
+
+		def printSummary(name: String, messages: Array[String]) {
+			if (printFrameworkName)
+				log.info(name)
+			if (messages.size > 0)
+				messages.foreach(log.info(_))
+			else
+				log.info("Summary for " + name + " not available.")
+		}
+
+		firstSummary match {
+			case Some((name, messages)) => printSummary(name, messages)
+			case None => // Do nothing
+		}
+	    
+		secondSummary match {
+			case Some((name, messages)) => printSummary(name, messages)
+			case None => // Do nothing
+		}
+	    
+		while (iterator.hasNext) {
+			val (name, messages) = iterator.next
+			printSummary(name, messages)
+		}
+	    
+		// Print the standard one-liner statistic if no framework summary is defined, or when > 1 framework is in used.
+		if ((firstSummary.isDefined && !(firstSummary.get._2.size > 0) && !secondSummary.isDefined) || (firstSummary.isDefined && secondSummary.isDefined)) 
+		{
+			val (skippedCount, errorsCount, passedCount, failuresCount) = resultCounter.getCounts
+			val totalCount = failuresCount + errorsCount + skippedCount + passedCount
+			val postfix = "Total " + totalCount + ", Failed " + failuresCount + ", Errors " + errorsCount + ", Passed " + passedCount + ", Skipped " + skippedCount
+			results._1 match {
+				case TestResult.Error => log.error("Error: " + postfix)
+				case TestResult.Passed => log.info("Passed: " + postfix)
+				case TestResult.Failed => log.error("Failed: " + postfix)
+			}
+		}
+	    
+		// Let's always print out Failed tests for now
 		if (results._2.isEmpty)
 			log.info(noTestsMessage)
 		else {
@@ -184,17 +247,20 @@ object Tests
 
 			def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
 				if(!tests.isEmpty)
-					{
-						log.log(level, label)
-						log.log(level, tests.mkString("\t", "\n\t", ""))
-					}
+				{
+					log.log(level, label)
+					log.log(level, tests.mkString("\t", "\n\t", ""))
+				}
 
 			show("Passed tests:", Level.Debug, passed )
 			show("Failed tests:", Level.Error, failures)
 			show("Error during tests:", Level.Error, errors)
-
-			if(!failures.isEmpty || !errors.isEmpty)
-				throw new TestsFailedException
+		}
+	    
+		results._1 match {
+			case TestResult.Error => throw new TestsFailedException
+			case TestResult.Passed => 
+			case TestResult.Failed => throw new TestsFailedException
 		}
 	}
 
