@@ -79,10 +79,10 @@ object Sbt extends Build
 		// Apache Ivy integration
 	lazy val ivySub = baseProject(file("ivy"), "Ivy") dependsOn(interfaceSub, launchInterfaceSub, crossSub, logSub % "compile;test->test", ioSub % "compile;test->test", launchSub % "test->test") settings(ivy, jsch, httpclient, testExclusive)
 	  // Runner for uniform test interface
-	lazy val testingSub = baseProject(file("testing"), "Testing") dependsOn(ioSub, classpathSub, logSub, launchInterfaceSub, testAgentSub) settings(libraryDependencies += "org.scala-tools.testing" % "test-interface" % "0.6")
+	lazy val testingSub = baseProject(file("testing"), "Testing") dependsOn(ioSub, classpathSub, logSub, launchInterfaceSub, testAgentSub) settings(libraryDependencies += "org.scala-tools.testing" % "test-interface" % "1.0")
   	// Testing agent for running tests in a separate process.
 	lazy val testAgentSub = project(file("testing/agent"), "Test Agent") settings(
-		libraryDependencies += "org.scala-tools.testing" % "test-interface" % "0.6"
+		libraryDependencies += "org.scala-tools.testing" % "test-interface" % "1.0"
 	)
 
 		// Basic task engine
