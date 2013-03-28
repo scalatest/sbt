@@ -77,7 +77,7 @@ final class TestLogging(val global: TLogger, val logTest: TestDefinition => Cont
 final class ContentLogger(val log: TLogger, val flush: () => Unit)
 class TestLogger(val logging: TestLogging) extends TestsListener
 {
-    import logging.{global => log, logTest}
+	import logging.{global => log, logTest}
 	
 	def startGroup(name: String) {}
 	def testEvent(event: TestEvent): Unit = {}
