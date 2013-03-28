@@ -52,8 +52,8 @@ private[sbt] object ForkTests {
 
 							os.writeInt(runners.size)
 							for ((testFramework, mainRunner) <- runners) {
-							    val remoteArgs = mainRunner.remoteArgs()
-							    os.writeObject(testFramework.implClassNames.toArray)
+								val remoteArgs = mainRunner.remoteArgs()
+								os.writeObject(testFramework.implClassNames.toArray)
 								os.writeObject(mainRunner.args)
 								os.writeObject(if (remoteArgs == null) Array.empty[String] else remoteArgs)
 							}
@@ -78,10 +78,10 @@ private[sbt] object ForkTests {
 						if (ec != 0)
 							(TestResult.Error, Map("Running java with options " + options.mkString(" ") + " failed with exit code " + ec -> TestResult.Error))
 						else {
-						    // Need to wait acceptor thread to finish its business
-						    while (acceptorThread.isAlive)
-						      Thread.sleep(10)
-						    Acceptor.result
+							// Need to wait acceptor thread to finish its business
+							while (acceptorThread.isAlive)
+								Thread.sleep(10)
+							Acceptor.result
 						}
 					
 					testListeners.foreach(_.doComplete(result._1))
