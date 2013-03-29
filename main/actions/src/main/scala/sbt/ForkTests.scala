@@ -72,7 +72,8 @@ private[sbt] object ForkTests {
 
 				try {
 					testListeners.foreach(_.doInit())
-					new Thread(Acceptor).start()
+					val acceptorThread = new Thread(Acceptor)
+					acceptorThread.start()
 
 					val fullCp = classpath ++: Seq(IO.classLocationFile[ForkMain], IO.classLocationFile[Framework])
 					val options = Seq("-classpath", fullCp mkString File.pathSeparator, classOf[ForkMain].getCanonicalName, server.getLocalPort.toString)
@@ -80,8 +81,12 @@ private[sbt] object ForkTests {
 					val result =
 						if (ec != 0)
 							(TestResult.Error, Map("Running java with options " + options.mkString(" ") + " failed with exit code " + ec -> TestResult.Error))
-						else
-							Acceptor.result
+						else {
+						    // Need to wait acceptor thread to finish its business
+						    while (acceptorThread.isAlive)
+						      Thread.sleep(10)
+						    Acceptor.result
+						}
 					testListeners.foreach(_.doComplete(result._1))
 					result
 				} finally {
@@ -102,7 +107,7 @@ private final class React(is: ObjectInputStream, os: ObjectOutputStream, log: Lo
 		case Array(`Info`, s: String) => log.info(s); react()
 		case Array(`Debug`, s: String) => log.debug(s); react()
 		case t: Throwable => log.trace(t); react()
-		case Array(group: String, tEvents: Array[Event]) =>
+		case Array(group: String, tEvents: Array[ForkEvent]) =>
 			listeners.foreach(_ startGroup group)
 			val event = TestEvent(tEvents)
 			listeners.foreach(_ testEvent event)
