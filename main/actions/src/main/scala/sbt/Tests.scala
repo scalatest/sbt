@@ -43,7 +43,8 @@ object Tests
 
 	final case class Execution(options: Seq[TestOption], parallel: Boolean, tags: Seq[(Tag, Int)])
 
-	def apply(frameworks: Map[TestFramework, Framework], testLoader: ClassLoader, runners: Map[TestFramework, Runner], discovered: Seq[TestDefinition], config: Execution, log: Logger): Task[Output] =
+	def apply(frameworks: Map[TestFramework, Framework], testLoader: ClassLoader, runners: Map[TestFramework, Runner], discovered: Seq[TestDefinition], 
+	          config: Execution, log: Logger, resultCounter: TestResultCounter): Task[Output] =
 	{
 			import collection.mutable.{HashSet, ListBuffer, Map, Set}
 		val testFilters = new ListBuffer[String => Boolean]
@@ -61,6 +62,8 @@ object Tests
 				case None => undefinedFrameworks ++= framework.implClassNames
 			}
 
+		testListeners += resultCounter
+		
 		for(option <- config.options)
 		{
 			option match
@@ -142,6 +145,7 @@ object Tests
 				(overall(rs), ms reduce (_ ++ _))
 			}
 		}
+
 	def overall(results: Iterable[TestResult.Value]): TestResult.Value =
 		(TestResult.Passed /: results) { (acc, result) => if(acc.id < result.id) result else acc }
 	def discover(frameworks: Seq[Framework], analysis: Analysis, log: Logger): (Seq[TestDefinition], Set[String]) =
@@ -172,8 +176,17 @@ object Tests
 		(tests, mains.toSet)
 	}
 
-	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String): Unit =
+	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String, resultCounter: TestResultCounter): Unit =
 	{
+	    val (skipped, errors, passed, failures) = resultCounter.getCounts
+	    val totalCount = failures + errors + skipped + passed
+        val postfix = "Total " + totalCount + ", Failed " + failures + ", Errors " + errors + ", Passed " + passed + ", Skipped " + skipped
+        results._1 match {
+            case TestResult.Error => log.error("Error: " + postfix)
+            case TestResult.Passed => log.info("Passed: " + postfix)
+            case TestResult.Failed => log.error("Failed: " + postfix)
+        }
+	  
 		if (results._2.isEmpty)
 			log.info(noTestsMessage)
 		else {
