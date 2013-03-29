@@ -67,9 +67,9 @@ class EventHandlerWrapper(newEventHandler: EventHandler, fullyQualifiedName: Str
   
 }
 
-class RunnerWrapper(oldRunner: OldRunner, eventHandler: EventHandler, args: Array[String]) extends Runner {
+class RunnerWrapper(oldFramework: OldFramework, testClassLoader: ClassLoader, args: Array[String]) extends Runner {
   
-  def task(fullyQualifiedName: String, fingerprint: Fingerprint): Task = 
+  def task(fullyQualifiedName: String, fingerprint: Fingerprint, eventHandler: EventHandler, loggers: Array[NewLogger]): Task = 
     new Task {
       def tags: Array[String] = Array.empty  // Old framework does not support tags
       def execute: Array[Task] = {
@@ -77,39 +77,28 @@ class RunnerWrapper(oldRunner: OldRunner, eventHandler: EventHandler, args: Arra
           fingerprint match {
             case test: TestFingerprintWrapper => (test.oldFingerprint, test.isModule)
           }
-        oldRunner.run(fullyQualifiedName, oldFingerprint, new EventHandlerWrapper(eventHandler, fullyQualifiedName, isModule), args)
-        Array.empty
-      }
-    }
-    
-  def task(fullyQualifiedName: String, isModule: Boolean, selectors: Array[Selector]): Task = 
-    throw new UnsupportedOperationException("Old framework does not support selector.")
-    
-  def done: Boolean = false
-}
-
-class Runner2Wrapper(oldRunner: OldRunner2, eventHandler: EventHandler, args: Array[String]) extends Runner {
-  
-  def task(fullyQualifiedName: String, fingerprint: Fingerprint): Task = 
-    new Task {
-      def tags: Array[String] = Array.empty  // Old framework does not support tags
-      def execute: Array[Task] = {
-        val (oldFingerprint, isModule) = 
-          fingerprint match {
-            case subClass: SubclassFingerprintWrapper => (subClass.oldFingerprint, subClass.isModule)
-            case test: TestFingerprintWrapper => (test.oldFingerprint, test.isModule)
-            case annotated: AnnotatedFingerprintWrapper => (annotated.oldFingerprint, annotated.isModule)
+        oldFramework.testRunner(testClassLoader, 
+                                loggers.map { newLogger => 
+                                  new OldLogger {
+                                    def ansiCodesSupported = newLogger.ansiCodesSupported 
+                                    def error(msg: String) { newLogger.error(msg) }
+	                                def warn(msg: String) { newLogger.warn(msg) }
+	                                def info(msg: String) { newLogger.info(msg) }
+	                                def debug(msg: String) { newLogger.debug(msg) }
+	                                def trace(t: Throwable) { newLogger.trace(t) }
+                                  }
+                                }) match {
+            case runner2: OldRunner2 => runner2.run(fullyQualifiedName, oldFingerprint, new EventHandlerWrapper(eventHandler, fullyQualifiedName, isModule), args)
+            case runner: OldRunner => runner.run(fullyQualifiedName, oldFingerprint, new EventHandlerWrapper(eventHandler, fullyQualifiedName, isModule), args)
           }
-        oldRunner.run(fullyQualifiedName, oldFingerprint, new EventHandlerWrapper(eventHandler, fullyQualifiedName, isModule), args)
         Array.empty
       }
     }
     
-  def task(fullyQualifiedName: String, isModule: Boolean, selectors: Array[Selector]): Task = 
+  def task(fullyQualifiedName: String, isModule: Boolean, selectors: Array[Selector], eventHandler: EventHandler, loggers: Array[NewLogger]): Task = 
     throw new UnsupportedOperationException("Old framework does not support selector.")
     
   def done: Boolean = false
-  
 }
 
 class FrameworkWrapper(oldFramework: OldFramework) extends Framework {
@@ -118,24 +107,12 @@ class FrameworkWrapper(oldFramework: OldFramework) extends Framework {
   
   def fingerprints: Array[Fingerprint] = oldFramework.tests.map { oldFingerprint => 
     oldFingerprint match {
+      case test: TestFingerprint => new TestFingerprintWrapper(test)
       case subClass: OldSubclassFingerprint => new SubclassFingerprintWrapper(subClass)
       case annotated: OldAnnotatedFingerprint => new AnnotatedFingerprintWrapper(annotated)
-      case test: TestFingerprint => new TestFingerprintWrapper(test)
     }
   }.toArray
   
-  def runner(args: Array[String], testClassLoader: ClassLoader, eventHandler: EventHandler, loggers: Array[NewLogger]): Runner = 
-    oldFramework.testRunner(testClassLoader, loggers.map { newLogger => 
-      new OldLogger {
-        def ansiCodesSupported = newLogger.ansiCodesSupported 
-        def error(msg: String) { newLogger.error(msg) }
-	    def warn(msg: String) { newLogger.warn(msg) }
-	    def info(msg: String) { newLogger.info(msg) }
-	    def debug(msg: String) { newLogger.debug(msg) }
-	    def trace(t: Throwable) { newLogger.trace(t) }
-      }
-    }) match {
-      case runner2: OldRunner2 => new Runner2Wrapper(runner2, eventHandler, args)
-      case runner: OldRunner => new RunnerWrapper(runner, eventHandler, args)
-    }
+  def runner(args: Array[String], testClassLoader: ClassLoader): Runner = 
+    new RunnerWrapper(oldFramework, testClassLoader, args)
 }
