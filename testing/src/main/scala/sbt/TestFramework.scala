@@ -91,8 +91,6 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
     
     protected def safeListenersCall(call: (TestReportListener) => Unit): Unit =
 		TestFramework.safeForeach(listeners, log)(call)
-		
-    def done(): Boolean = delegate.done()
 }
 
 object TestFramework
