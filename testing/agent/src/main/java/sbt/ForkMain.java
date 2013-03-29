@@ -13,6 +13,7 @@ import java.net.Socket;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Arrays;
 
 public class ForkMain {
 	static class SubclassFingerscan implements SubclassFingerprint, Serializable {
@@ -223,19 +224,41 @@ public class ForkMain {
 			is.readObject();
 		}
 		void runTestSafe(ForkTestDefinition test, Runner runner, Logger[] loggers, ObjectOutputStream os) {
-			ForkEvent[] events;
 			try {
-				events = runTest(test, runner, loggers, os);
+				Task task = runner.task(test.name, test.fingerprint);
+				Task[] nestedTasks = runTest(test, task, loggers, os);
+				while (true) {
+					List<Task> newNestedTasks = new ArrayList<Task>();
+					int nestedTasksLength = nestedTasks.length;
+					for (int i = 0; i < nestedTasksLength; i++) {
+						Task nestedTask = nestedTasks[i];
+						newNestedTasks.addAll(Arrays.asList(runTest(new ForkTestDefinition(test.name + "-" + i, test.fingerprint), nestedTask, loggers, os)));
+					}
+					if (newNestedTasks.size() == 0)
+						break;
+					else {
+						nestedTasks = newNestedTasks.toArray(new Task[newNestedTasks.size()]);
+					}
+				}
 			} catch (Throwable t) {
+				writeEvents(os, test, new ForkEvent[] { testError(os, test, "Uncaught exception when running " + test.name + ": " + t.toString(), t) });
+			}
+		}
+		Task[] runTest(ForkTestDefinition test, Task task, Logger[] loggers, ObjectOutputStream os) {
+			ForkEvent[] events;
+			Task[] nestedTasks;
+			try {
+				final List<ForkEvent> eventList = new ArrayList<ForkEvent>();
+				EventHandler handler = new EventHandler() { public void handle(Event e){ eventList.add(new ForkEvent(e)); } };
+				nestedTasks = task.execute(handler, loggers);
+				events = eventList.toArray(new ForkEvent[eventList.size()]);
+			}
+			catch (Throwable t) {
+				nestedTasks = new Task[0];
 				events = new ForkEvent[] { testError(os, test, "Uncaught exception when running " + test.name + ": " + t.toString(), t) };
 			}
 			writeEvents(os, test, events);
-		}
-		ForkEvent[] runTest(ForkTestDefinition test, Runner runner, Logger[] loggers, ObjectOutputStream os) {
-			final List<ForkEvent> events = new ArrayList<ForkEvent>();
-			EventHandler handler = new EventHandler() { public void handle(Event e){ events.add(new ForkEvent(e)); } };
-			runner.task(test.name, test.fingerprint).execute(handler, loggers);
-			return events.toArray(new ForkEvent[events.size()]);
+			return nestedTasks;
 		}
 		void run(ObjectInputStream is, ObjectOutputStream os) throws Exception {
 			try {
