@@ -1,6 +1,6 @@
 package sbt
 
-import org.scalasbt.testing.{Logger => TLogger, Event => TEvent, Status => TStatus}
+import testing.{Logger => TLogger, Event => TEvent, Status => TStatus}
 
 class TestResultCounter extends TestsListener {
     
