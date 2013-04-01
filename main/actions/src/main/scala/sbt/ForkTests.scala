@@ -53,9 +53,9 @@ private[sbt] object ForkTests {
 							os.writeInt(runners.size)
 							for ((testFramework, mainRunner) <- runners) {
 							    val remoteArgs = mainRunner.remoteArgs()
-							    os.writeObject(testFramework.implClassName)
+							    os.writeObject(testFramework.implClassNames.toArray)
 								os.writeObject(mainRunner.args)
-								os.writeObject(remoteArgs)
+								os.writeObject(if (remoteArgs == null) Array.empty[String] else remoteArgs)
 							}
 							os.flush()
 

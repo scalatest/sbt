@@ -183,21 +183,27 @@ public class ForkMain {
 			};
 
 			for (int i = 0; i < nFrameworks; i++) {
-				final String implClassName = (String) is.readObject();
+				final String[] implClassNames = (String[]) is.readObject();
 				final String[] frameworkArgs = (String[]) is.readObject();
 				final String[] remoteFrameworkArgs = (String[]) is.readObject();
 
-				final Framework framework;
-				try {
-					Object rawFramework = Class.forName(implClassName).newInstance();
-					if (rawFramework instanceof Framework)
-						framework = (Framework) rawFramework;
-					else
-					    framework = new FrameworkWrapper((org.scalatools.testing.Framework) rawFramework);
-				} catch (ClassNotFoundException e) {
-					logError(os, "Framework implementation '" + implClassName + "' not present.");
-					continue;
+				Framework framework = null;
+				
+				for (String implClassName : implClassNames) {
+					try {
+						Object rawFramework = Class.forName(implClassName).newInstance();
+						if (rawFramework instanceof Framework)
+							framework = (Framework) rawFramework;
+						else
+						    framework = new FrameworkWrapper((org.scalatools.testing.Framework) rawFramework);
+						break;
+					} catch (ClassNotFoundException e) {
+						logError(os, "Framework implementation '" + implClassName + "' not present.");
+					}
 				}
+				
+				if (framework == null)
+                    continue;
 
 				ArrayList<ForkTestDefinition> filteredTests = new ArrayList<ForkTestDefinition>();
 				for (Fingerprint testFingerprint : framework.fingerprints()) {
