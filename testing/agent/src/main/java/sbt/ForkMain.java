@@ -153,7 +153,7 @@ public class ForkMain {
 		class RunAborted extends RuntimeException {
 			RunAborted(Exception e) { super(e); }
 		}
-		void write(ObjectOutputStream os, Object obj) {
+		synchronized void write(ObjectOutputStream os, Object obj) {
 			try {
 				os.writeObject(obj);
 				os.flush();
@@ -207,6 +207,7 @@ public class ForkMain {
 				final Runner runner = framework.runner(frameworkArgs, new String[0], getClass().getClassLoader());
 				for (ForkTestDefinition test : filteredTests)
 					runTestSafe(test, runner, loggers, os);
+				runner.done();
 			}
 			write(os, ForkTags.Done);
 			is.readObject();

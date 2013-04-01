@@ -92,6 +92,8 @@ final class TestRunner(framework: Framework, loader: ClassLoader, args: Array[St
     
     protected def safeListenersCall(call: (TestReportListener) => Unit): Unit =
 		TestFramework.safeForeach(listeners, log)(call)
+		
+    def done(): Array[String] = delegate.done()
 }
 
 object TestFramework
@@ -184,6 +186,12 @@ object TestFramework
 	private def createTestTasks(loader: ClassLoader, tests: Map[Framework, (Set[TestDefinition], Seq[String])], ordered: Seq[TestDefinition], log: Logger, listeners: Seq[TestReportListener]) =
 	{
 		val testsListeners = listeners collect { case tl: TestsListener => tl }
+		
+		val runnerMap = 
+		  tests map { case (framework, (testDefinitions, testArgs)) =>
+		    (framework, new TestRunner(framework, loader, testArgs.toArray, listeners, log))
+		}
+		
 		def foreachListenerSafe(f: TestsListener => Unit): () => Unit = () => safeForeach(testsListeners, log)(f)
 		
 			import TestResult.{Error,Passed,Failed}
@@ -192,12 +200,12 @@ object TestFramework
 		val testTasks =
 			tests flatMap { case (framework, (testDefinitions, testArgs)) =>
 			
-					val runner = new TestRunner(framework, loader, testArgs.toArray, listeners, log)
-					for(testDefinition <- testDefinitions) yield
-					{
-						val runTest = () => withContextLoader(loader) { runner.run(testDefinition) }
-						(testDefinition.name, runTest)
-					}
+			    val runner = runnerMap(framework)
+			    for(testDefinition <- testDefinitions) yield
+			    {
+				    val runTest = () => withContextLoader(loader) { runner.run(testDefinition) }
+				    (testDefinition.name, runTest)
+			    }
 			}
 
 		val endTask = (result: TestResult.Value) => foreachListenerSafe(_.doComplete(result))
