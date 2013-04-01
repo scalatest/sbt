@@ -93,7 +93,6 @@ class EventHandlerWrapper implements org.scalatools.testing.EventHandler {
 	public void handle(org.scalatools.testing.Event oldEvent) {
 		newEventHandler.handle(new EventWrapper(oldEvent, fullyQualifiedName, isModule));
 	}
-  
 }
 
 class EventWrapper implements Event {

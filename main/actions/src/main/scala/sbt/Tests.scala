@@ -11,7 +11,7 @@ package sbt
 	import xsbti.api.Definition
 	import ConcurrentRestrictions.Tag
 
-	import testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint}
+	import testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint, DoNotDiscoverFingerprint}
 
 	import java.io.File
 
@@ -152,6 +152,7 @@ object Tests
 	{
 		val subclasses = fingerprints collect { case sub: SubclassFingerprint => (sub.superclassName, sub.isModule, sub) };
 		val annotations = fingerprints collect { case ann: AnnotatedFingerprint => (ann.annotationName, ann.isModule, ann) };
+		val doNotDiscoverAnnotations = fingerprints collect { case ann: DoNotDiscoverFingerprint => ann.annotationName };
 		log.debug("Subclass fingerprints: " + subclasses)
 		log.debug("Annotation fingerprints: " + annotations)
 
@@ -163,8 +164,10 @@ object Tests
 			defined(subclasses, d.baseClasses, d.isModule) ++
 			defined(annotations, d.annotations, d.isModule)
 
-		val discovered = Discovery(firsts(subclasses), firsts(annotations))(definitions)
-		val tests = for( (df, di) <- discovered; fingerprint <- toFingerprints(di) ) yield new TestDefinition(df.name, fingerprint)
+		val discovered = Discovery(firsts(subclasses), firsts(annotations), doNotDiscoverAnnotations.toSet)(definitions)
+		val tests = for( (df, di) <- discovered; 
+		                 if (!di.doNotDiscover);
+		                 fingerprint <- toFingerprints(di) ) yield new TestDefinition(df.name, fingerprint)
 		val mains = discovered collect { case (df, di) if di.hasMain => df.name }
 		(tests, mains.toSet)
 	}
