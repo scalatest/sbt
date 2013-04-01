@@ -185,6 +185,7 @@ public class ForkMain {
 			for (int i = 0; i < nFrameworks; i++) {
 				final String implClassName = (String) is.readObject();
 				final String[] frameworkArgs = (String[]) is.readObject();
+				final String[] remoteFrameworkArgs = (String[]) is.readObject();
 
 				final Framework framework;
 				try {
@@ -204,7 +205,7 @@ public class ForkMain {
 						if (matches(testFingerprint, test.fingerprint)) filteredTests.add(test);
 					}
 				}
-				final Runner runner = framework.runner(frameworkArgs, new String[0], getClass().getClassLoader());
+				final Runner runner = framework.runner(frameworkArgs, remoteFrameworkArgs, getClass().getClassLoader());
 				for (ForkTestDefinition test : filteredTests)
 					runTestSafe(test, runner, loggers, os);
 				runner.done();
