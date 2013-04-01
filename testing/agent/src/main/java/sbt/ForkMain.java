@@ -195,15 +195,15 @@ public class ForkMain {
 						if (rawFramework instanceof Framework)
 							framework = (Framework) rawFramework;
 						else
-						    framework = new FrameworkWrapper((org.scalatools.testing.Framework) rawFramework);
+							framework = new FrameworkWrapper((org.scalatools.testing.Framework) rawFramework);
 						break;
 					} catch (ClassNotFoundException e) {
 						logError(os, "Framework implementation '" + implClassName + "' not present.");
 					}
 				}
-				
+
 				if (framework == null)
-                    continue;
+					continue;
 
 				ArrayList<ForkTestDefinition> filteredTests = new ArrayList<ForkTestDefinition>();
 				for (Fingerprint testFingerprint : framework.fingerprints()) {

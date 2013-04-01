@@ -38,7 +38,7 @@ public class FrameworkWrapper implements Framework {
 class SubclassFingerprintWrapper implements SubclassFingerprint {
 	private String superclassName;
 	private boolean isModule;
-    
+
 	public SubclassFingerprintWrapper(org.scalatools.testing.SubclassFingerprint oldFingerprint) {
 		this.superclassName = oldFingerprint.superClassName();
 		this.isModule = oldFingerprint.isModule();
@@ -93,6 +93,7 @@ class EventHandlerWrapper implements org.scalatools.testing.EventHandler {
 	public void handle(org.scalatools.testing.Event oldEvent) {
 		newEventHandler.handle(new EventWrapper(oldEvent, fullyQualifiedName, isModule));
 	}
+
 }
 
 class EventWrapper implements Event {
@@ -216,7 +217,6 @@ class RunnerWrapper implements Runner {
 				else {
 					runRunner(runner, fingerprint, eventHandler);
 				}
-
 				return new Task[0];
 			}
 		};

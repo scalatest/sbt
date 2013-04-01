@@ -353,9 +353,9 @@ object Defaults extends BuildCommon
 		test := {
 			implicit val display = Project.showContextKey(state.value)
 			val summaries = 
-			  testRunners.value map { case (tf, r) =>
-			    (loadedTestFrameworks.value.apply(tf).name, r.done())
-			  }
+				testRunners.value map { case (tf, r) =>
+					(loadedTestFrameworks.value.apply(tf).name, r.done())
+				}
 			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value), testResultCounter.value, summaries)
 		},
 		testOnly <<= inputTests(testOnly),
@@ -454,32 +454,32 @@ object Defaults extends BuildCommon
 			val groupsTask = allTestGroupsTask(s, loadedTestFrameworks.value, testLoader.value, testRunners.value, testGrouping.value, newConfig, fullClasspath.value, javaHome.value, testResultCounter.value)
 			val processed = // should we just showResults once per run here?
 				for(out <- groupsTask) yield {
-				    val summaries = 
-			            testRunners.value map { case (tf, r) =>
-			                (loadedTestFrameworks.value.apply(tf).name, r.done())
-			            }
-				    Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value), testResultCounter.value, summaries)
-				}
+					val summaries = 
+						testRunners.value map { case (tf, r) =>
+							(loadedTestFrameworks.value.apply(tf).name, r.done())
+						}
+					Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value), testResultCounter.value, summaries)
+			}
 			Def.value(processed)
 		}
 	}
 	
 	def createTestRunners(frameworks: Map[TestFramework,Framework], loader: ClassLoader, config: Tests.Execution) = {
-	  import Tests.Argument
-	  val opts = config.options.toList
-	  frameworks.map { case (tf, f) =>
-		val args = opts.flatMap {
-		  case Argument(None | Some(`tf`), args) => args
-		  case _ => Nil
-	    }
-		val mainRunner = f.runner(args.toArray, Array.empty[String], loader)
-		tf -> mainRunner
-      }
+		import Tests.Argument
+		val opts = config.options.toList
+		frameworks.map { case (tf, f) =>
+			val args = opts.flatMap {
+				case Argument(None | Some(`tf`), args) => args
+				case _ => Nil
+			}
+			val mainRunner = f.runner(args.toArray, Array.empty[String], loader)
+			tf -> mainRunner
+		}
 	}
 
 	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, runners: Map[TestFramework, Runner], groups: Seq[Tests.Group], 
-	                      config: Tests.Execution, cp: Classpath, javaHome: Option[File], resultCounter: TestResultCounter): Task[Tests.Output] = {
-	  val groupTasks = groups map {
+						config: Tests.Execution, cp: Classpath, javaHome: Option[File], resultCounter: TestResultCounter): Task[Tests.Output] = {
+		val groupTasks = groups map {
 			case Tests.Group(name, tests, runPolicy) =>
 				runPolicy match {
 					case Tests.SubProcess(opts) =>
@@ -488,7 +488,7 @@ object Defaults extends BuildCommon
 						Tests(frameworks, loader, runners, tests, config, s.log, resultCounter)
 				}
 		}
-	Tests.foldTasks(groupTasks, config.parallel)
+		Tests.foldTasks(groupTasks, config.parallel)
 	}
 
 	def selectedFilter(args: Seq[String]): Seq[String => Boolean] =
