@@ -5,8 +5,9 @@ package sbt
 
 	import java.io.File
 	import java.net.URLClassLoader
-	import org.scalatools.testing.{AnnotatedFingerprint, Fingerprint, SubclassFingerprint, TestFingerprint}
-	import org.scalatools.testing.{Event, EventHandler, Framework, Runner, Runner2, Logger=>TLogger}
+	import testing.{AnnotatedFingerprint, Fingerprint, SubclassFingerprint, DoNotDiscoverFingerprint}
+	import testing.{Event, EventHandler, Framework, Runner, Logger=>TLogger}
+	import org.scalatools.testing.{Framework => OldFramework}
 	import classpath.{ClasspathUtilities, DualLoader, FilteredLoader}
 
 object TestResult extends Enumeration
@@ -27,8 +28,19 @@ case class TestFramework(val implClassName: String)
 {
 	def create(loader: ClassLoader, log: Logger): Option[Framework] =
 	{
-		try { Some(Class.forName(implClassName, true, loader).newInstance.asInstanceOf[Framework]) }
-		catch { case e: ClassNotFoundException => log.debug("Framework implementation '" + implClassName + "' not present."); None }
+		try 
+		{ 
+			Some(
+				Class.forName(implClassName, true, loader).newInstance match {
+					case newFramework: Framework => newFramework
+					case oldFramework: OldFramework => new FrameworkWrapper(oldFramework)
+				} 
+			)
+		}
+		catch 
+		{ 
+			case e: ClassNotFoundException => log.debug("Framework implementation '" + implClassName + "' not present."); None 
+		}
 	}
 }
 final class TestDefinition(val name: String, val fingerprint: Fingerprint)
@@ -43,33 +55,21 @@ final class TestDefinition(val name: String, val fingerprint: Fingerprint)
 	override def hashCode: Int = (name.hashCode, TestFramework.hashCode(fingerprint)).hashCode
 }
 
-final class TestRunner(framework: Framework, loader: ClassLoader, listeners: Seq[TestReportListener], log: Logger)
-{
-	private[this] def run(testDefinition: TestDefinition, handler: EventHandler, args: Array[String]): Unit =
-	{
-		val loggers = listeners.flatMap(_.contentLogger(testDefinition))
-		val delegate = framework.testRunner(loader, loggers.map(_.log).toArray)
-		try { delegateRun(delegate, testDefinition, handler, args) }
-		finally { loggers.foreach( _.flush() ) }
-	}
-	private[this] def delegateRun(delegate: Runner, testDefinition: TestDefinition, handler: EventHandler, args: Array[String]): Unit =
-		(testDefinition.fingerprint, delegate) match
-		{
-			case (simple: TestFingerprint, _) => delegate.run(testDefinition.name, simple, handler, args)
-			case (basic, runner2: Runner2) => runner2.run(testDefinition.name, basic, handler, args)
-			case _ => sys.error("Framework '" + framework + "' does not support test '" + testDefinition + "'")
-		}
+final class TestRunner(framework: Framework, loader: ClassLoader, args: Array[String], listeners: Seq[TestReportListener], log: Logger) {
+	val delegate = framework.runner(args, Array.empty, loader)
 
-	final def run(testDefinition: TestDefinition, args: Seq[String]): TestResult.Value =
+	final def run(testDefinition: TestDefinition): TestResult.Value =
 	{
-		log.debug("Running " + testDefinition + " with arguments " + args.mkString(", "))
+		log.debug("Running " + testDefinition)
 		val name = testDefinition.name
 		def runTest() =
 		{
 			// here we get the results! here is where we'd pass in the event listener
 			val results = new scala.collection.mutable.ListBuffer[Event]
 			val handler = new EventHandler { def handle(e:Event){ results += e } }
-			run(testDefinition, handler, args.toArray)
+			val loggers = listeners.flatMap(_.contentLogger(testDefinition))
+			try delegate.task(testDefinition.name, testDefinition.fingerprint).execute(handler, loggers.map(_.log).toArray)
+			finally loggers.foreach( _.flush() ) 
 			val event = TestEvent(results)
 			safeListenersCall(_.testEvent( event ))
 			event.result
@@ -95,13 +95,12 @@ final class TestRunner(framework: Framework, loader: ClassLoader, listeners: Seq
 }
 
 object TestFramework
-{
-	def getTests(framework: Framework): Seq[Fingerprint] =
-		framework.getClass.getMethod("tests").invoke(framework) match
+{ 
+	def getFingerprints(framework: Framework): Seq[Fingerprint] =
+		framework.getClass.getMethod("fingerprints").invoke(framework) match
 		{
-			case newStyle: Array[Fingerprint] => newStyle.toList
-			case oldStyle: Array[TestFingerprint] => oldStyle.toList
-			case _ => sys.error("Could not call 'tests' on framework " + framework)
+			case fingerprints: Array[Fingerprint] => fingerprints.toList
+			case _ => sys.error("Could not call 'fingerprints' on framework " + framework)
 		}
 
 	private val ScalaCompilerJarPackages = "scala.tools." :: "jline." :: "ch.epfl.lamp." :: Nil
@@ -113,22 +112,24 @@ object TestFramework
 		it.foreach(i => try f(i) catch { case e: Exception => log.trace(e); log.error(e.toString) })
 
 	private[sbt] def hashCode(f: Fingerprint): Int = f match {
-		case s: SubclassFingerprint => (s.isModule, s.superClassName).hashCode
+		case s: SubclassFingerprint => (s.isModule, s.superclassName).hashCode
 		case a: AnnotatedFingerprint => (a.isModule, a.annotationName).hashCode
+		case d: DoNotDiscoverFingerprint => d.annotationName.hashCode
 		case _ => 0
 	}
 	def matches(a: Fingerprint, b: Fingerprint) =
 		(a, b) match
 		{
-			case (a: SubclassFingerprint, b: SubclassFingerprint) => a.isModule == b.isModule && a.superClassName == b.superClassName
+			case (a: SubclassFingerprint, b: SubclassFingerprint) => a.isModule == b.isModule && a.superclassName == b.superclassName
 			case (a: AnnotatedFingerprint, b: AnnotatedFingerprint) => a.isModule == b.isModule && a.annotationName == b.annotationName
 			case _ => false
 		}
 	def toString(f: Fingerprint): String =
 		f match
 		{
-			case sf: SubclassFingerprint => "subclass(" + sf.isModule + ", " + sf.superClassName + ")"
+			case sf: SubclassFingerprint => "subclass(" + sf.isModule + ", " + sf.superclassName + ")"
 			case af: AnnotatedFingerprint => "annotation(" + af.isModule + ", " + af.annotationName + ")"
+			case dd: DoNotDiscoverFingerprint => "donotdiscover(" + dd.annotationName + ")"
 			case _ => f.toString
 		}
 
@@ -160,7 +161,7 @@ object TestFramework
 		{
 			for(test <- tests if !map.values.exists(_.contains(test)))
 			{
-				def isTestForFramework(framework: Framework) = getTests(framework).exists {t => matches(t, test.fingerprint) }
+				def isTestForFramework(framework: Framework) = getFingerprints(framework).exists {t => matches(t, test.fingerprint) }
 				for(framework <- frameworks.find(isTestForFramework))
 					map.getOrElseUpdate(framework, new HashSet[TestDefinition]) += test
 			}
@@ -171,7 +172,7 @@ object TestFramework
 	}
 	private[this] def mergeDuplicates(framework: Framework, tests: Seq[TestDefinition]): Set[TestDefinition] =
 	{
-		val frameworkPrints = framework.tests.reverse
+		val frameworkPrints = framework.fingerprints.reverse
 		def pickOne(prints: Seq[Fingerprint]): Fingerprint =
 			frameworkPrints.find(prints.toSet) getOrElse prints.head
 		val uniqueDefs =
@@ -191,10 +192,10 @@ object TestFramework
 		val testTasks =
 			tests flatMap { case (framework, (testDefinitions, testArgs)) =>
 			
-					val runner = new TestRunner(framework, loader, listeners, log)
+					val runner = new TestRunner(framework, loader, testArgs.toArray, listeners, log)
 					for(testDefinition <- testDefinitions) yield
 					{
-						val runTest = () => withContextLoader(loader) { runner.run(testDefinition, testArgs) }
+						val runTest = () => withContextLoader(loader) { runner.run(testDefinition) }
 						(testDefinition.name, runTest)
 					}
 			}
@@ -210,8 +211,8 @@ object TestFramework
 	}
 	def createTestLoader(classpath: Seq[File], scalaInstance: ScalaInstance, tempDir: File): ClassLoader =
 	{
-		val interfaceJar = IO.classLocationFile(classOf[org.scalatools.testing.Framework])
-		val interfaceFilter = (name: String) => name.startsWith("org.scalatools.testing.")
+		val interfaceJar = IO.classLocationFile(classOf[testing.Framework])
+		val interfaceFilter = (name: String) => name.startsWith("org.scalatools.testing.") || name.startsWith("sbt.testing.")
 		val notInterfaceFilter = (name: String) => !interfaceFilter(name)
 		val dual = new DualLoader(scalaInstance.loader, notInterfaceFilter, x => true, getClass.getClassLoader, interfaceFilter, x => false)
 		val main = ClasspathUtilities.makeLoader(classpath, dual, scalaInstance, tempDir)
