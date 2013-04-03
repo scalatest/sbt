@@ -350,7 +350,10 @@ object Defaults extends BuildCommon
 		executeTests <<= (streams in test, loadedTestFrameworks, testLoader, testGrouping in test, testExecution in test, fullClasspath in test, javaHome in test) flatMap allTestGroupsTask,
 		test := {
 			implicit val display = Project.showContextKey(state.value)
-			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value))
+			val groupsTask = executeTests.value
+			val output = groupsTask._1
+			val resultCounter = groupsTask._2
+			Tests.showResults(streams.value.log, output, noTestsMessage(resolvedScoped.value), resultCounter)
 		},
 		testOnly <<= inputTests(testOnly),
 		testQuick <<= inputTests(testQuick)
@@ -448,8 +451,11 @@ object Defaults extends BuildCommon
 			val newConfig = config.copy(options = modifiedOpts)
 			val groupsTask = allTestGroupsTask(s, loadedTestFrameworks.value, testLoader.value, testGrouping.value, newConfig, fullClasspath.value, javaHome.value)
 			val processed =
-				for(out <- groupsTask) yield
-					Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value))
+				for(groupTask <- groupsTask) yield {
+					val output = groupTask._1
+					val resultCounter = groupTask._2
+					Tests.showResults(s.log, output, noTestsMessage(resolvedScoped.value), resultCounter)
+				}
 			Def.value(processed)
 		}
 	}
@@ -467,22 +473,26 @@ object Defaults extends BuildCommon
 		}
 	}
 
-	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, groups: Seq[Tests.Group], config: Tests.Execution,	cp: Classpath, javaHome: Option[File]): Task[Tests.Output] = {
+	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, groups: Seq[Tests.Group], 
+						config: Tests.Execution, cp: Classpath, javaHome: Option[File]): Task[(Tests.Output, TestResultCounter)] = {
 		val runners = createTestRunners(frameworks, loader, config)
+		val resultCounter = new TestResultCounter
 		val groupTasks = groups map {
 			case Tests.Group(name, tests, runPolicy) =>
 				runPolicy match {
 					case Tests.SubProcess(opts) =>
-						ForkTests(runners, tests.toList, config, cp.files, opts, s.log) tag Tags.ForkedTestGroup
+						ForkTests(runners, tests.toList, config, cp.files, opts, s.log, resultCounter) tag Tags.ForkedTestGroup
 					case Tests.InProcess =>
-						Tests(frameworks, loader, runners, tests, config, s.log)
+						Tests(frameworks, loader, runners, tests, config, s.log, resultCounter)
 				}
 		}
-		val output = Tests.foldTasks(groupTasks, config.parallel)
-		runners map { case (tf, r) =>
-			r.done()
+		val outputTask = Tests.foldTasks(groupTasks, config.parallel)
+		outputTask map { output => 
+			runners map { case (tf, r) =>
+				r.done()
+			}
+			(output, resultCounter)
 		}
-		output
 	}
 
 	def selectedFilter(args: Seq[String]): Seq[String => Boolean] =
