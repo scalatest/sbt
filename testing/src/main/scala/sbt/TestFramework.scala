@@ -79,7 +79,7 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
 				delegate.task(testDefinition.name, isModule, false, Array(new SuiteSelector))
 		}
 
-	final def run(testDefinition: TestDefinition, testTask: TestTask): TestEvent =
+	final def run(testDefinition: TestDefinition, testTask: TestTask): (TestEvent, Seq[TestTask]) =
 	{
 		log.debug("Running " + testDefinition)
 		val name = testDefinition.name
@@ -89,25 +89,26 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
 			val results = new scala.collection.mutable.ListBuffer[Event]
 			val handler = new EventHandler { def handle(e:Event){ results += e } }
 			val loggers = listeners.flatMap(_.contentLogger(testDefinition))
-			try testTask.execute(handler, loggers.map(_.log).toArray)
-			finally loggers.foreach( _.flush() ) 
+			val nestedTasks =
+				try testTask.execute(handler, loggers.map(_.log).toArray)
+				finally loggers.foreach( _.flush() ) 
 			val event = TestEvent(results)
 			safeListenersCall(_.testEvent( event ))
-			event
+			(event, nestedTasks.toSeq)
 		}
 
 		safeListenersCall(_.startGroup(name))
 		try
 		{
-			val testEvent = runTest()
+			val (testEvent, nestedTasks) = runTest()
 			safeListenersCall(_.endGroup(name, testEvent.result))
-			testEvent
+			(testEvent, nestedTasks)
 		}
 		catch
 		{
 			case e: Throwable =>
 				safeListenersCall(_.endGroup(name, e))
-				TestEvent.Error
+				(TestEvent.Error, Seq.empty[TestTask])
 		}
 	}
 
@@ -215,8 +216,8 @@ object TestFramework
 				val runner = runners(framework)
 				for(testDefinition <- testDefinitions) yield
 				{
-					val task = withContextLoader(loader) { runner.task(testDefinition) }
-					val testFunction = new TestFunction(() => withContextLoader(loader) { runner.run(testDefinition, task) }) { def tags = task.tags }
+					val testTask = withContextLoader(loader) { runner.task(testDefinition) }
+					val testFunction = createTestFunction(loader, testDefinition, runner, testTask)
 					(testDefinition.name, testFunction)
 				}
 			}
@@ -239,11 +240,13 @@ object TestFramework
 		val main = ClasspathUtilities.makeLoader(classpath, dual, scalaInstance, tempDir)
 		ClasspathUtilities.filterByClasspath(interfaceJar +: classpath, main)
 	}
+	def createTestFunction(loader: ClassLoader, testDefinition: TestDefinition, runner:TestRunner, testTask: TestTask): TestFunction = 
+		new TestFunction(testDefinition, runner, (r: TestRunner) => withContextLoader(loader) { r.run(testDefinition, testTask) }) { def tags = testTask.tags }
 }
 
-abstract class TestFunction(fun: () => TestEvent) {
+abstract class TestFunction(val testDefinition: TestDefinition, val runner: TestRunner, fun: (TestRunner) => (TestEvent, Seq[TestTask])) {
 
-	def apply(): TestEvent = fun()
+	def apply(): (TestEvent, Seq[TestTask]) = fun(runner)
 
-	def tags: Array[String]
+	def tags: Seq[String]
 }
