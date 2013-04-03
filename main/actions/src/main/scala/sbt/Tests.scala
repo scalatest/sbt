@@ -114,7 +114,7 @@ object Tests
 		val setupTasks = fj(partApp(userSetup) :+ frameworkSetup)
 		val mainTasks =
 			if(config.parallel)
-				makeParallel(runnables, setupTasks, config.tags).toSeq.join
+				makeParallel(loader, runnables, setupTasks, config.tags)//.toSeq.join
 			else
 				makeSerial(loader, runnables, setupTasks, config.tags)
 		val taggedMainTasks = mainTasks.tagw(config.tags : _*)
@@ -124,8 +124,29 @@ object Tests
 		}
 	}
 	type TestRunnable = (String, TestFunction)
-	def makeParallel(runnables: Iterable[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) =
-		runnables map { case (name, test) => task { (name, test()._1) } tagw(tags : _*) tag(test.tags map (ConcurrentRestrictions.Tag(_)) : _*) dependsOn setupTasks named name }
+
+	def makeParallel(loader: ClassLoader, runnables: Iterable[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]): Task[Map[String,TestResult.Value]] =
+		toTasks(loader, runnables.toSeq, tags).dependsOn(setupTasks)
+
+	def toTasks(loader: ClassLoader, runnables: Seq[TestRunnable], tags: Seq[(Tag,Int)]): Task[Map[String, TestResult.Value]] = {
+		val tasks = runnables.map { case (name, test) => toTask(loader, name, test, tags) }
+		tasks.join.map( _.foldLeft(Map.empty[String, TestResult.Value]) { case (sum, e) =>  
+			sum ++ e		  
+		} )
+	}
+
+	def toTask(loader: ClassLoader, name: String, fun: TestFunction, tags: Seq[(Tag,Int)]): Task[Map[String, TestResult.Value]] = {
+		val base = task { (name, fun()) }
+		val taggedBase = base.tagw(tags : _*).tag(fun.tags.map(ConcurrentRestrictions.Tag(_)) : _*)
+		taggedBase flatMap { case (name, (result, nested)) =>
+			val nestedTasks = 
+				nested.view.zipWithIndex.map { case (nt, idx) => 
+					val nestedTestFun = TestFramework.createTestFunction(loader, new TestDefinition(fun.testDefinition.name + "-" + idx, fun.testDefinition.fingerprint), fun.runner, nt)
+					(name, nestedTestFun)
+				}
+			toTasks(loader, nestedTasks, tags).map( _.updated(name, result) )
+		}
+	}
 
 	def makeSerial(loader: ClassLoader, runnables: Seq[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) = 
 	{
