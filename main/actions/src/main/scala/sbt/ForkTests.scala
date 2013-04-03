@@ -11,12 +11,12 @@ import Tests.{Output => TestOutput, _}
 import ForkMain._
 
 private[sbt] object ForkTests {
-	def apply(runners: Map[TestFramework, Runner],  tests: List[TestDefinition], config: Execution, classpath: Seq[File], fork: ForkOptions, log: Logger): Task[TestOutput]  = {
+	def apply(runners: Map[TestFramework, Runner],  tests: List[TestDefinition], config: Execution, classpath: Seq[File], fork: ForkOptions, log: Logger, resultCounter: TestResultCounter): Task[TestOutput]  = {
 		val opts = config.options.toList
-		val listeners = opts flatMap {
+		val listeners = resultCounter :: (opts flatMap {
 			case Listeners(ls) => ls
 			case _ => Nil
-		}
+		})
 		val testListeners = listeners flatMap {
 			case tl: TestsListener => Some(tl)
 			case _ => None

@@ -187,6 +187,7 @@ object Keys
 	val definedTests = TaskKey[Seq[TestDefinition]]("defined-tests", "Provides the list of defined tests.", BMinusTask)
 	val definedTestNames = TaskKey[Seq[String]]("defined-test-names", "Provides the set of defined test names.", BMinusTask)
 	val testRunners = TaskKey[Map[TestFramework, Runner]]("test-runners", "Provided test runners to run tests", DTask)
+	val testResultCounter = TaskKey[TestResultCounter]("test-result-counter", "Provided test result counter to count test result", DTask)
 	val executeTests = TaskKey[Tests.Output]("execute-tests", "Executes all tests, producing a report.", CTask)
 	val test = TaskKey[Unit]("test", "Executes all tests.", APlusTask)
 	val testOnly = InputKey[Unit]("test-only", "Executes the tests provided as arguments or all tests if no arguments are provided.", ATask)

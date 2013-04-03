@@ -348,14 +348,15 @@ object Defaults extends BuildCommon
 		testFilter in testOnly :== (selectedFilter _),
 		testFilter in testQuick <<= testQuickFilter,
 		testRunners := createTestRunners(loadedTestFrameworks.value, testLoader.value, (testExecution in test).value),
-		executeTests <<= (streams in test, loadedTestFrameworks, testLoader, testRunners, testGrouping in test, testExecution in test, fullClasspath in test, javaHome in test) flatMap allTestGroupsTask,
+		testResultCounter := new TestResultCounter, 
+		executeTests <<= (streams in test, loadedTestFrameworks, testLoader, testRunners, testGrouping in test, testExecution in test, fullClasspath in test, javaHome in test, testResultCounter) flatMap allTestGroupsTask,
 		test := {
 			implicit val display = Project.showContextKey(state.value)
 			val doneResults = 
 			  testRunners.value map { case (tf, r) =>
 			    r.done()
 			  }
-			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value))
+			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value), testResultCounter.value)
 		},
 		testOnly <<= inputTests(testOnly),
 		testQuick <<= inputTests(testQuick)
@@ -450,10 +451,10 @@ object Defaults extends BuildCommon
 			implicit val display = Project.showContextKey(state.value)
 			val modifiedOpts = Tests.Filters(filter(selected)) +: Tests.Argument(frameworkOptions : _*) +: config.options
 			val newConfig = config.copy(options = modifiedOpts)
-			val groupsTask = allTestGroupsTask(s, loadedTestFrameworks.value, testLoader.value, testRunners.value, testGrouping.value, newConfig, fullClasspath.value, javaHome.value)
+			val groupsTask = allTestGroupsTask(s, loadedTestFrameworks.value, testLoader.value, testRunners.value, testGrouping.value, newConfig, fullClasspath.value, javaHome.value, testResultCounter.value)
 			val processed =
 				for(out <- groupsTask) yield
-					Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value))
+					Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value), testResultCounter.value)
 			Def.value(processed)
 		}
 	}
@@ -471,14 +472,15 @@ object Defaults extends BuildCommon
 		}
 	}
 
-	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, runners: Map[TestFramework, Runner], groups: Seq[Tests.Group], config: Tests.Execution,	cp: Classpath, javaHome: Option[File]): Task[Tests.Output] = {
+	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, runners: Map[TestFramework, Runner], groups: Seq[Tests.Group], 
+						config: Tests.Execution, cp: Classpath, javaHome: Option[File], resultCounter: TestResultCounter): Task[Tests.Output] = {
 		val groupTasks = groups map {
 			case Tests.Group(name, tests, runPolicy) =>
 				runPolicy match {
 					case Tests.SubProcess(opts) =>
-						ForkTests(runners, tests.toList, config, cp.files, opts, s.log) tag Tags.ForkedTestGroup
+						ForkTests(runners, tests.toList, config, cp.files, opts, s.log, resultCounter) tag Tags.ForkedTestGroup
 					case Tests.InProcess =>
-						Tests(frameworks, loader, runners, tests, config, s.log)
+						Tests(frameworks, loader, runners, tests, config, s.log, resultCounter)
 				}
 		}
 	Tests.foldTasks(groupTasks, config.parallel)
