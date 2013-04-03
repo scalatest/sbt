@@ -12,6 +12,7 @@ package sbt
 	import ConcurrentRestrictions.Tag
 
 	import testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint, Runner, Task => TestTask}
+	import scala.annotation.tailrec
 
 	import java.io.File
 
@@ -116,7 +117,7 @@ object Tests
 			if(config.parallel)
 				makeParallel(runnables, setupTasks, config.tags).toSeq.join
 			else
-				makeSerial(runnables, setupTasks, config.tags)
+				makeSerial(loader, runnables, setupTasks, config.tags)
 		val taggedMainTasks = mainTasks.tagw(config.tags : _*)
 		taggedMainTasks map processResults flatMap { results =>
 			val cleanupTasks = fj(partApp(userCleanup) :+ frameworkCleanup(results._1))
@@ -125,10 +126,26 @@ object Tests
 	}
 	type TestRunnable = (String, TestFunction)
 	def makeParallel(runnables: Iterable[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) =
-		runnables map { case (name, test) => task { (name, test()) } tagw(tags : _*) tag(test.tags map (ConcurrentRestrictions.Tag(_)) : _*) dependsOn setupTasks named name }
+		runnables map { case (name, test) => task { (name, test()._1) } tagw(tags : _*) tag(test.tags map (ConcurrentRestrictions.Tag(_)) : _*) dependsOn setupTasks named name }
 
-	def makeSerial(runnables: Seq[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) =
-		task { runnables map { case (name, test) => (name, test()) } } dependsOn(setupTasks)
+	def makeSerial(loader: ClassLoader, runnables: Seq[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]): Task[List[(String, TestResult.Value)]] = 
+	{
+		@tailrec
+		def processRunnable(runnableList: List[TestRunnable], acc: List[(String, TestResult.Value)]): List[(String, TestResult.Value)] = 
+			runnableList match {
+				case hd :: rst => 
+					val testFun = hd._2
+					val (result, nestedTasks) = testFun()
+					val nestedRunnables = 
+						nestedTasks.view.zipWithIndex map { case (nt, idx) =>
+							(hd._1, TestFramework.createTestFunction(loader, new TestDefinition(testFun.testDefinition.name + "-" + idx, testFun.testDefinition.fingerprint), testFun.runner, nt))
+						}
+					processRunnable(nestedRunnables.toList ::: rst, (hd._1, result) :: acc)
+				case Nil => acc
+			}
+
+		task { processRunnable(runnables.toList, List.empty) } dependsOn(setupTasks)
+	}
 
 	def processResults(results: Iterable[(String, TestResult.Value)]): (TestResult.Value, Map[String, TestResult.Value]) =
 		(overall(results.map(_._2)), results.toMap)
