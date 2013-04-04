@@ -175,41 +175,68 @@ object Tests
 		(tests, mains.toSet)
 	}
 
-	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String, resultCounter: TestResultCounter): Unit =
+	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String, resultCounter: TestResultCounter, 
+					summaries: Iterable[Array[String]]): Unit =
 	{
-		val (skipped, errors, passed, failures) = resultCounter.getCounts
-		val totalCount = failures + errors + skipped + passed
-		val postfix = "Total " + totalCount + ", Failed " + failures + ", Errors " + errors + ", Passed " + passed + ", Skipped " + skipped
-		results._1 match {
-			case TestResult.Error => log.error("Error: " + postfix)
-			case TestResult.Passed => log.info("Passed: " + postfix)
-			case TestResult.Failed => log.error("Failed: " + postfix)
+		val iterator = summaries.iterator
+		val firstSummary = 
+			if (iterator.hasNext) {
+				val first = iterator.next
+				if (first.isEmpty)
+					None
+				else
+					Some(first)
+			}
+			else
+				None
+
+		val useSummaryFromFramework = firstSummary.isDefined && !iterator.hasNext
+
+		if (useSummaryFromFramework) {
+			results._1 match {
+				case TestResult.Error => firstSummary.get.foreach(log.error(_))
+				case TestResult.Passed => firstSummary.get.foreach(log.info(_))
+				case TestResult.Failed => firstSummary.get.foreach(log.error(_))
+			}
 		}
+		else {  
+			val (skippedCount, errorsCount, passedCount, failuresCount) = resultCounter.getCounts
+			val totalCount = failuresCount + errorsCount + skippedCount + passedCount
+			val postfix = "Total " + totalCount + ", Failed " + failuresCount + ", Errors " + errorsCount + ", Passed " + passedCount + ", Skipped " + skippedCount
+			results._1 match {
+				case TestResult.Error => log.error("Error: " + postfix)
+				case TestResult.Passed => log.info("Passed: " + postfix)
+				case TestResult.Failed => log.error("Failed: " + postfix)
+			}
 
-		if (results._2.isEmpty)
-			log.info(noTestsMessage)
-		else {
-			import TestResult.{Error, Failed, Passed}
+			if (results._2.isEmpty)
+				log.info(noTestsMessage)
+			else {
+				import TestResult.{Error, Failed, Passed}
 
-			def select(Tpe: TestResult.Value) = results._2 collect { case (name, Tpe) => name }
+				def select(Tpe: TestResult.Value) = results._2 collect { case (name, Tpe) => name }
 
-			val failures = select(Failed)
-			val errors = select(Error)
-			val passed = select(Passed)
+				val failures = select(Failed)
+				val errors = select(Error)
+				val passed = select(Passed)
 
-			def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
-				if(!tests.isEmpty)
+				def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
+					if(!tests.isEmpty)
 					{
 						log.log(level, label)
 						log.log(level, tests.mkString("\t", "\n\t", ""))
 					}
 
-			show("Passed tests:", Level.Debug, passed )
-			show("Failed tests:", Level.Error, failures)
-			show("Error during tests:", Level.Error, errors)
+				show("Passed tests:", Level.Debug, passed )
+				show("Failed tests:", Level.Error, failures)
+				show("Error during tests:", Level.Error, errors)
+			}
+		}
 
-			if(!failures.isEmpty || !errors.isEmpty)
-				throw new TestsFailedException
+		results._1 match {
+			case TestResult.Error => throw new TestsFailedException
+			case TestResult.Passed => 
+			case TestResult.Failed => throw new TestsFailedException
 		}
 	}
 

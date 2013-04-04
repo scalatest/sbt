@@ -352,11 +352,11 @@ object Defaults extends BuildCommon
 		executeTests <<= (streams in test, loadedTestFrameworks, testLoader, testRunners, testGrouping in test, testExecution in test, fullClasspath in test, javaHome in test, testResultCounter) flatMap allTestGroupsTask,
 		test := {
 			implicit val display = Project.showContextKey(state.value)
-			val doneResults = 
+			val summaries = 
 			  testRunners.value map { case (tf, r) =>
 			    r.done()
 			  }
-			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value), testResultCounter.value)
+			Tests.showResults(streams.value.log, executeTests.value, noTestsMessage(resolvedScoped.value), testResultCounter.value, summaries)
 		},
 		testOnly <<= inputTests(testOnly),
 		testQuick <<= inputTests(testQuick)
@@ -452,9 +452,14 @@ object Defaults extends BuildCommon
 			val modifiedOpts = Tests.Filters(filter(selected)) +: Tests.Argument(frameworkOptions : _*) +: config.options
 			val newConfig = config.copy(options = modifiedOpts)
 			val groupsTask = allTestGroupsTask(s, loadedTestFrameworks.value, testLoader.value, testRunners.value, testGrouping.value, newConfig, fullClasspath.value, javaHome.value, testResultCounter.value)
-			val processed =
-				for(out <- groupsTask) yield
-					Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value), testResultCounter.value)
+			val processed = // should we just showResults once per run here?
+				for(out <- groupsTask) yield {
+				    val summaries = 
+			            testRunners.value map { case (tf, r) =>
+			                r.done()
+			            }
+				    Tests.showResults(s.log, out, noTestsMessage(resolvedScoped.value), testResultCounter.value, summaries)
+				}
 			Def.value(processed)
 		}
 	}
