@@ -209,6 +209,7 @@ public class ForkMain {
 				final Runner runner = framework.runner(frameworkArgs, remoteFrameworkArgs, getClass().getClassLoader());
 				for (ForkTestDefinition test : filteredTests)
 					runTestSafe(test, runner, loggers, os);
+				runner.done();
 			}
 			write(os, ForkTags.Done);
 			is.readObject();
