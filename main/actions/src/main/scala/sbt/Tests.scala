@@ -172,17 +172,63 @@ object Tests
 		(tests, mains.toSet)
 	}
 
-	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String, resultCounter: TestResultCounter): Unit =
+	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestResult.Value]), noTestsMessage: =>String, resultCounter: TestResultCounter, 
+					summaries: Iterable[(String, Array[String])]): Unit =
 	{
-		val (skipped, errors, passed, failures) = resultCounter.getCounts
-		val totalCount = failures + errors + skipped + passed
-		val postfix = "Total " + totalCount + ", Failed " + failures + ", Errors " + errors + ", Passed " + passed + ", Skipped " + skipped
-		results._1 match {
-			case TestResult.Error => log.error("Error: " + postfix)
-			case TestResult.Passed => log.info("Passed: " + postfix)
-			case TestResult.Failed => log.error("Failed: " + postfix)
+		val iterator = summaries.iterator
+		val firstSummary = 
+			if (iterator.hasNext) 
+				Some(iterator.next)
+			else
+				None
+
+		val secondSummary = 
+			if (iterator.hasNext) 
+				Some(iterator.next)
+			else
+				None
+
+		// print framework name when there is > 1 framework
+		val printFrameworkName = firstSummary.isDefined && secondSummary.isDefined
+
+		def printSummary(name: String, messages: Array[String]) {
+			if (printFrameworkName)
+				log.info(name)
+			if (messages.size > 0)
+				messages.foreach(log.info(_))
+			else
+				log.info("Summary for " + name + " not available.")
 		}
 
+		firstSummary match {
+			case Some((name, messages)) => printSummary(name, messages)
+			case None => // Do nothing
+		}
+
+		secondSummary match {
+			case Some((name, messages)) => printSummary(name, messages)
+			case None => // Do nothing
+		}
+
+		while (iterator.hasNext) {
+			val (name, messages) = iterator.next
+			printSummary(name, messages)
+		}
+
+		// Print the standard one-liner statistic if no framework summary is defined, or when > 1 framework is in used.
+		if ((firstSummary.isDefined && !(firstSummary.get._2.size > 0) && !secondSummary.isDefined) || (firstSummary.isDefined && secondSummary.isDefined)) 
+		{
+			val (skippedCount, errorsCount, passedCount, failuresCount) = resultCounter.getCounts
+			val totalCount = failuresCount + errorsCount + skippedCount + passedCount
+			val postfix = "Total " + totalCount + ", Failed " + failuresCount + ", Errors " + errorsCount + ", Passed " + passedCount + ", Skipped " + skippedCount
+			results._1 match {
+				case TestResult.Error => log.error("Error: " + postfix)
+				case TestResult.Passed => log.info("Passed: " + postfix)
+				case TestResult.Failed => log.error("Failed: " + postfix)
+			}
+		}
+
+		// Let's always print out Failed tests for now
 		if (results._2.isEmpty)
 			log.info(noTestsMessage)
 		else {
@@ -196,17 +242,20 @@ object Tests
 
 			def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
 				if(!tests.isEmpty)
-					{
-						log.log(level, label)
-						log.log(level, tests.mkString("\t", "\n\t", ""))
-					}
+				{
+					log.log(level, label)
+					log.log(level, tests.mkString("\t", "\n\t", ""))
+				}
 
 			show("Passed tests:", Level.Debug, passed )
 			show("Failed tests:", Level.Error, failures)
 			show("Error during tests:", Level.Error, errors)
+		}
 
-			if(!failures.isEmpty || !errors.isEmpty)
-				throw new TestsFailedException
+		results._1 match {
+			case TestResult.Error => throw new TestsFailedException
+			case TestResult.Passed => 
+			case TestResult.Failed => throw new TestsFailedException
 		}
 	}
 

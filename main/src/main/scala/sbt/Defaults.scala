@@ -353,7 +353,8 @@ object Defaults extends BuildCommon
 			val groupsTask = executeTests.value
 			val output = groupsTask._1
 			val resultCounter = groupsTask._2
-			Tests.showResults(streams.value.log, output, noTestsMessage(resolvedScoped.value), resultCounter)
+			val summaries = groupsTask._3
+			Tests.showResults(streams.value.log, output, noTestsMessage(resolvedScoped.value), resultCounter, summaries)
 		},
 		testOnly <<= inputTests(testOnly),
 		testQuick <<= inputTests(testQuick)
@@ -453,7 +454,8 @@ object Defaults extends BuildCommon
 				for(groupTask <- groupsTask) yield {
 					val output = groupTask._1
 					val resultCounter = groupTask._2
-					Tests.showResults(s.log, output, noTestsMessage(resolvedScoped.value), resultCounter)
+					val summaries = groupTask._3
+					Tests.showResults(s.log, output, noTestsMessage(resolvedScoped.value), resultCounter, summaries)
 				}
 			Def.value(processed)
 		}
@@ -473,7 +475,7 @@ object Defaults extends BuildCommon
 	}
 
 	def allTestGroupsTask(s: TaskStreams, frameworks: Map[TestFramework,Framework], loader: ClassLoader, groups: Seq[Tests.Group], 
-						config: Tests.Execution, cp: Classpath, javaHome: Option[File]): Task[(Tests.Output, TestResultCounter)] = {
+						config: Tests.Execution, cp: Classpath, javaHome: Option[File]): Task[(Tests.Output, TestResultCounter, Iterable[(String, Array[String])])] = {
 		val runners = createTestRunners(frameworks, loader, config)
 		val resultCounter = new TestResultCounter
 		val groupTasks = groups map {
@@ -487,10 +489,11 @@ object Defaults extends BuildCommon
 		}
 		val outputTask = Tests.foldTasks(groupTasks, config.parallel)
 		outputTask map { output => 
-			runners map { case (tf, r) =>
-				r.done()
-			}
-			(output, resultCounter)
+			val summaries = 
+				runners map { case (tf, r) =>
+					(frameworks(tf).name, r.done())
+				}
+			(output, resultCounter, summaries)
 		}
 	}
 
