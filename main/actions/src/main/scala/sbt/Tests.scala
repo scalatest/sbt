@@ -11,7 +11,7 @@ package sbt
 	import xsbti.api.Definition
 	import ConcurrentRestrictions.Tag
 
-	import testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint, Runner}
+	import testing.{AnnotatedFingerprint, Fingerprint, Framework, SubclassFingerprint, Runner, Task => TestTask}
 
 	import java.io.File
 
@@ -123,9 +123,10 @@ object Tests
 			cleanupTasks map { _ => results }
 		}
 	}
-	type TestRunnable = (String, () => TestResult.Value)
+	type TestRunnable = (String, TestFunction)
 	def makeParallel(runnables: Iterable[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) =
-		runnables map { case (name, test) => task { (name, test()) } tagw(tags : _*) dependsOn setupTasks named name }
+		runnables map { case (name, test) => task { (name, test()) } tagw(tags : _*) tag(test.tags map (ConcurrentRestrictions.Tag(_)) : _*) dependsOn setupTasks named name }
+
 	def makeSerial(runnables: Seq[TestRunnable], setupTasks: Task[Unit], tags: Seq[(Tag,Int)]) =
 		task { runnables map { case (name, test) => (name, test()) } } dependsOn(setupTasks)
 
