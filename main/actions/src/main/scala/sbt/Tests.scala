@@ -20,6 +20,7 @@ object Tests
 {
 	// (overall result, individual results)
 	type Output = (TestResult.Value, Map[String,TestEvent])
+	type Summary = (String, String)
 	
 	final case class Setup(setup: ClassLoader => Unit) extends TestOption
 	def Setup(setup: () => Unit) = new Setup(_ => setup())
@@ -169,21 +170,40 @@ object Tests
 		(tests, mains.toSet)
 	}
 
-	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestEvent]), noTestsMessage: =>String): Unit =
+	def showResults(log: Logger, results: (TestResult.Value, Map[String, TestEvent]), noTestsMessage: =>String, summaries: Iterable[Summary]): Unit =
 	{
-		val (skipped, errors, passed, failures) = 
-			results._2.foldLeft((0, 0, 0, 0)) { case (acc, entry) =>
-				val testEvent = entry._2
-				(acc._1 + testEvent.skippedCount, acc._2 + testEvent.errorCount, acc._3 + testEvent.passedCount, acc._4 + testEvent.failureCount)
-			}
-		val totalCount = failures + errors + skipped + passed
-		val postfix = "Total " + totalCount + ", Failed " + failures + ", Errors " + errors + ", Passed " + passed + ", Skipped " + skipped
-		results._1 match {
-			case TestResult.Error => log.error("Error: " + postfix)
-			case TestResult.Passed => log.info("Passed: " + postfix)
-			case TestResult.Failed => log.error("Failed: " + postfix)
+		val multipleFrameworks = summaries.size > 1
+		def printSummary(name: String, message: String) 
+		{
+			if (multipleFrameworks)
+				log.info(name)
+			if (message.size > 0)
+				log.info(message)
+			else
+				log.info("Summary for " + name + " not available.")
 		}
 
+		for ((name, messages) <- summaries)
+			printSummary(name, messages)
+		val noSummary = summaries.headOption.forall(_._2.size == 0)
+		val printStandard = multipleFrameworks || noSummary
+		// Print the standard one-liner statistic if no framework summary is defined, or when > 1 framework is in used.
+		if (printStandard)
+		{
+			val (skippedCount, errorsCount, passedCount, failuresCount) = 
+				results._2.foldLeft((0, 0, 0, 0)) { case (acc, entry) =>
+					val testEvent = entry._2
+					(acc._1 + testEvent.skippedCount, acc._2 + testEvent.errorCount, acc._3 + testEvent.passedCount, acc._4 + testEvent.failureCount)
+				}
+			val totalCount = failuresCount + errorsCount + skippedCount + passedCount
+			val postfix = "Total " + totalCount + ", Failed " + failuresCount + ", Errors " + errorsCount + ", Passed " + passedCount + ", Skipped " + skippedCount
+			results._1 match {
+				case TestResult.Error => log.error("Error: " + postfix)
+				case TestResult.Passed => log.info("Passed: " + postfix)
+				case TestResult.Failed => log.error("Failed: " + postfix)
+			}
+		}
+		// Let's always print out Failed tests for now
 		if (results._2.isEmpty)
 			log.info(noTestsMessage)
 		else {
@@ -197,17 +217,19 @@ object Tests
 
 			def show(label: String, level: Level.Value, tests: Iterable[String]): Unit =
 				if(!tests.isEmpty)
-					{
-						log.log(level, label)
-						log.log(level, tests.mkString("\t", "\n\t", ""))
-					}
+				{
+					log.log(level, label)
+					log.log(level, tests.mkString("\t", "\n\t", ""))
+				}
 
 			show("Passed tests:", Level.Debug, passed )
 			show("Failed tests:", Level.Error, failures)
 			show("Error during tests:", Level.Error, errors)
+		}
 
-			if(!failures.isEmpty || !errors.isEmpty)
-				throw new TestsFailedException
+		results._1 match {
+			case TestResult.Error | TestResult.Failed => throw new TestsFailedException
+			case TestResult.Passed => 
 		}
 	}
 
