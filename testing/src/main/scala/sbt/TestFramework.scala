@@ -6,7 +6,7 @@ package sbt
 	import java.io.File
 	import java.net.URLClassLoader
 	import testing.{AnnotatedFingerprint, Fingerprint, SubclassFingerprint}
-	import testing.{Event, EventHandler, Framework, Runner, Logger=>TLogger}
+	import testing.{Event, EventHandler, Framework, Runner, Logger=>TLogger, Task => TestTask}
 	import org.scalatools.testing.{Framework => OldFramework}
 	import classpath.{ClasspathUtilities, DualLoader, FilteredLoader}
 	import scala.annotation.tailrec
@@ -66,7 +66,10 @@ final class TestDefinition(val name: String, val fingerprint: Fingerprint)
 
 final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log: Logger) {
 
-	final def run(testDefinition: TestDefinition): TestEvent =
+	final def task(testDefinition: TestDefinition): TestTask = 
+		delegate.task(testDefinition.name, testDefinition.fingerprint)
+
+	final def run(testDefinition: TestDefinition, testTask: TestTask): TestEvent =
 	{
 		log.debug("Running " + testDefinition)
 		val name = testDefinition.name
@@ -76,7 +79,7 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
 			val results = new scala.collection.mutable.ListBuffer[Event]
 			val handler = new EventHandler { def handle(e:Event){ results += e } }
 			val loggers = listeners.flatMap(_.contentLogger(testDefinition))
-			try delegate.task(testDefinition.name, testDefinition.fingerprint).execute(handler, loggers.map(_.log).toArray)
+			try testTask.execute(handler, loggers.map(_.log).toArray)
 			finally loggers.foreach( _.flush() ) 
 			val event = TestEvent(results)
 			safeListenersCall(_.testEvent( event ))
@@ -146,7 +149,7 @@ object TestFramework
 		log: Logger,
 		listeners: Seq[TestReportListener],
 		testArgsByFramework: Map[Framework, Seq[String]]):
-			(() => Unit, Seq[(String, () => TestEvent)], TestResult.Value => () => Unit) =
+			(() => Unit, Seq[(String, TestFunction)], TestResult.Value => () => Unit) =
 	{
 		val arguments = testArgsByFramework withDefaultValue Nil
 		val mappedTests = testMap(frameworks.values.toSeq, tests, arguments)
@@ -156,7 +159,7 @@ object TestFramework
 			createTestTasks(testLoader, runners.map { case (tf, r) => (frameworks(tf), new TestRunner(r, listeners, log))}, mappedTests, tests, log, listeners)
 	}
 
-	private[this] def order(mapped: Map[String, () => TestEvent], inputs: Seq[TestDefinition]): Seq[(String, () => TestEvent)] =
+	private[this] def order(mapped: Map[String, TestFunction], inputs: Seq[TestDefinition]): Seq[(String, TestFunction)] =
 		for( d <- inputs; act <- mapped.get(d.name) ) yield (d.name, act)
 
 	private[this] def testMap(frameworks: Seq[Framework], tests: Seq[TestDefinition], args: Map[Framework, Seq[String]]):
@@ -202,8 +205,9 @@ object TestFramework
 				val runner = runners(framework)
 				for(testDefinition <- testDefinitions) yield
 				{
-					val runTest = () => withContextLoader(loader) { runner.run(testDefinition) }
-					(testDefinition.name, runTest)
+					val task = withContextLoader(loader) { runner.task(testDefinition) }
+					val testFunction = new TestFunction(() => withContextLoader(loader) { runner.run(testDefinition, task) }) { def tags = task.tags }
+					(testDefinition.name, testFunction)
 				}
 			}
 
@@ -225,4 +229,11 @@ object TestFramework
 		val main = ClasspathUtilities.makeLoader(classpath, dual, scalaInstance, tempDir)
 		ClasspathUtilities.filterByClasspath(interfaceJar +: classpath, main)
 	}
+}
+
+abstract class TestFunction(fun: () => TestEvent) {
+
+	def apply(): TestEvent = fun()
+
+	def tags: Array[String]
 }
