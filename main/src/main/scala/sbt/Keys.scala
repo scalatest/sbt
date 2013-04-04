@@ -186,7 +186,7 @@ object Keys
 	val loadedTestFrameworks = TaskKey[Map[TestFramework,Framework]]("loaded-test-frameworks", "Loads Framework definitions from the test loader.", DTask)
 	val definedTests = TaskKey[Seq[TestDefinition]]("defined-tests", "Provides the list of defined tests.", BMinusTask)
 	val definedTestNames = TaskKey[Seq[String]]("defined-test-names", "Provides the set of defined test names.", BMinusTask)
-	val executeTests = TaskKey[Tests.Output]("execute-tests", "Executes all tests, producing a report.", CTask)
+	val executeTests = TaskKey[(Tests.Output, Iterable[Tests.Summary])]("execute-tests", "Executes all tests, producing a report.", CTask)
 	val test = TaskKey[Unit]("test", "Executes all tests.", APlusTask)
 	val testOnly = InputKey[Unit]("test-only", "Executes the tests provided as arguments or all tests if no arguments are provided.", ATask)
 	val testQuick = InputKey[Unit]("test-quick", "Executes the tests that either failed before, were not run or whose transitive dependencies changed, among those provided as arguments.", ATask)
