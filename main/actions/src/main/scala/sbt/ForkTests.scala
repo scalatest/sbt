@@ -106,7 +106,7 @@ private final class React(is: ObjectInputStream, os: ObjectOutputStream, log: Lo
 		case Array(`Info`, s: String) => log.info(s); react()
 		case Array(`Debug`, s: String) => log.debug(s); react()
 		case t: Throwable => log.trace(t); react()
-		case Array(group: String, tEvents: Array[Event]) =>
+		case Array(group: String, tEvents: Array[ForkEvent]) =>
 			listeners.foreach(_ startGroup group)
 			val event = TestEvent(tEvents)
 			listeners.foreach(_ testEvent event)
