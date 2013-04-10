@@ -28,10 +28,13 @@ trait TestsListener extends TestReportListener
   def doComplete(finalResult: TestResult.Value)
 }
 
-abstract class TestEvent extends NotNull
+trait TestEvent extends NotNull
 {
-	def result: Option[TestResult.Value]
-	def detail: Seq[TEvent] = Nil
+	def result: TestResult.Value
+	def passedCount: Int
+	def failureCount: Int
+	def errorCount: Int
+	def skippedCount: Int
 }
 object TestEvent
 {
@@ -44,9 +47,28 @@ object TestEvent
 			else TestResult.Passed
 		}
 		new TestEvent {
-			val result = Some(overallResult)
-			override val detail = events
+			val result = overallResult
+			val passedCount = events.count(_.status == TStatus.Success)
+			val failureCount = events.count(_.status == TStatus.Failure)
+			val errorCount = events.count(_.status == TStatus.Error)
+			val skippedCount = events.count(_.status == TStatus.Skipped)
 		}
+	}
+	
+	object Error extends TestEvent {
+		val result = TestResult.Error
+		val passedCount = 0
+		val failureCount = 0
+		val errorCount = 0
+		val skippedCount = 0
+	}
+	
+	object Empty extends TestEvent {
+		val result = TestResult.Passed
+		val passedCount = 0
+		val failureCount = 0
+		val errorCount = 0
+		val skippedCount = 0
 	}
 }
 
@@ -77,43 +99,18 @@ final class TestLogging(val global: TLogger, val logTest: TestDefinition => Cont
 final class ContentLogger(val log: TLogger, val flush: () => Unit)
 class TestLogger(val logging: TestLogging) extends TestsListener
 {
-		import logging.{global => log, logTest}
-		import java.util.concurrent.atomic.AtomicInteger
-	protected val skippedCount, errorsCount, passedCount, failuresCount = new AtomicInteger
+	import logging.{global => log, logTest}
 	
 	def startGroup(name: String) {}
-	def testEvent(event: TestEvent): Unit = event.detail.foreach(count)
+	def testEvent(event: TestEvent): Unit = {}
 	def endGroup(name: String, t: Throwable)
 	{
 		log.trace(t)
 		log.error("Could not run test " + name + ": " + t.toString)
 	}
 	def endGroup(name: String, result: TestResult.Value) {}
-	protected def count(event: TEvent): Unit =
-	{
-		val count = event.status match {
-			case TStatus.Error => errorsCount
-			case TStatus.Success => passedCount
-			case TStatus.Failure => failuresCount
-			case TStatus.Skipped => skippedCount
-		}
-		count.incrementAndGet()
-	}
-	def doInit
-	{
-		for (count <- List(skippedCount, errorsCount, passedCount, failuresCount)) count.set(0)
-	}
-	/** called once, at end. */
-	def doComplete(finalResult: TestResult.Value): Unit =
-	{
-		val (skipped, errors, passed, failures) = (skippedCount.get, errorsCount.get, passedCount.get, failuresCount.get)
-		val totalCount = failures + errors + skipped + passed
-		val postfix = ": Total " + totalCount + ", Failed " + failures + ", Errors " + errors + ", Passed " + passed + ", Skipped " + skipped
-		finalResult match {
-			case TestResult.Error => log.error("Error" + postfix)
-			case TestResult.Passed => log.info("Passed: " + postfix)
-			case TestResult.Failed => log.error("Failed: " + postfix)
-		}
-	}
+	def doInit {}
+	/** called once, at end of test group. */
+	def doComplete(finalResult: TestResult.Value): Unit = {}
 	override def contentLogger(test: TestDefinition): Option[ContentLogger] = Some(logTest(test))
 }
