@@ -65,7 +65,7 @@ final class TestDefinition(val name: String, val fingerprint: Fingerprint)
 
 final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log: Logger) {
 
-	final def run(testDefinition: TestDefinition): TestResult.Value =
+	final def run(testDefinition: TestDefinition): TestEvent =
 	{
 		log.debug("Running " + testDefinition)
 		val name = testDefinition.name
@@ -92,21 +92,21 @@ final class TestRunner(delegate: Runner, listeners: Seq[TestReportListener], log
 			finally loggers.foreach( _.flush() ) 
 			val event = TestEvent(results)
 			safeListenersCall(_.testEvent( event ))
-			event.result
+			event
 		}
 
 		safeListenersCall(_.startGroup(name))
 		try
 		{
-			val result = runTest().getOrElse(TestResult.Passed)
-			safeListenersCall(_.endGroup(name, result))
-			result
+			val testEvent = runTest()
+			safeListenersCall(_.endGroup(name, testEvent.result))
+			testEvent
 		}
 		catch
 		{
 			case e: Throwable =>
 				safeListenersCall(_.endGroup(name, e))
-				TestResult.Error
+				TestEvent.Error
 		}
 	}
 
@@ -158,7 +158,7 @@ object TestFramework
 		log: Logger,
 		listeners: Seq[TestReportListener],
 		testArgsByFramework: Map[Framework, Seq[String]]):
-			(() => Unit, Seq[(String, () => TestResult.Value)], TestResult.Value => () => Unit) =
+			(() => Unit, Seq[(String, () => TestEvent)], TestResult.Value => () => Unit) =
 	{
 		val arguments = testArgsByFramework withDefaultValue Nil
 		val mappedTests = testMap(frameworks.values.toSeq, tests, arguments)
@@ -168,7 +168,7 @@ object TestFramework
 			createTestTasks(testLoader, runners.map { case (tf, r) => (frameworks(tf), new TestRunner(r, listeners, log))}, mappedTests, tests, log, listeners)
 	}
 
-	private[this] def order(mapped: Map[String, () => TestResult.Value], inputs: Seq[TestDefinition]): Seq[(String, () => TestResult.Value)] =
+	private[this] def order(mapped: Map[String, () => TestEvent], inputs: Seq[TestDefinition]): Seq[(String, () => TestEvent)] =
 		for( d <- inputs; act <- mapped.get(d.name) ) yield (d.name, act)
 
 	private[this] def testMap(frameworks: Seq[Framework], tests: Seq[TestDefinition], args: Map[Framework, Seq[String]]):

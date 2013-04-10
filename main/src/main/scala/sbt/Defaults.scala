@@ -479,10 +479,12 @@ object Defaults extends BuildCommon
 				}
 		}
 		val output = Tests.foldTasks(groupTasks, config.parallel)
-		runners map { case (tf, r) =>
-			r.done()
+		output map { out => 
+			runners map { case (tf, r) =>
+				r.done()
+			}
+			out
 		}
-		output
 	}
 
 	def selectedFilter(args: Seq[String]): Seq[String => Boolean] =
