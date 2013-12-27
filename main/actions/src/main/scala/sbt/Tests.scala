@@ -187,8 +187,12 @@ object Tests
 
 	def toTasks(loader: ClassLoader, runnables: Seq[TestRunnable], tags: Seq[(Tag,Int)]): Task[Map[String, SuiteResult]] = {
 		val tasks = runnables.map { case (name, test) => toTask(loader, name, test, tags) }
-		tasks.join.map( _.foldLeft(Map.empty[String, SuiteResult]) { case (sum, e) =>  
-			sum ++ e		  
+		tasks.join.map( _.foldLeft(Map.empty[String, SuiteResult]) { case (sum, e) =>
+			val merged = sum.toSeq ++ e.toSeq
+			val grouped = merged.groupBy(_._1)
+			grouped.mapValues(_.map(_._2).foldLeft(SuiteResult.Empty) {
+				case (resultSum, result) => resultSum + result
+			})
 		} )
 	}
 
@@ -197,7 +201,14 @@ object Tests
 		val taggedBase = base.tagw(tags : _*).tag(fun.tags.map(ConcurrentRestrictions.Tag(_)) : _*)
 		taggedBase flatMap { case (name, (result, nested)) =>
 			val nestedRunnables = createNestedRunnables(loader, fun, nested)
-			toTasks(loader, nestedRunnables, tags).map( _.updated(name, result) )
+			toTasks(loader, nestedRunnables, tags).map { currentResultMap =>
+			  val newResult = 
+			    currentResultMap.get(name) match {
+			      case Some(currentResult) => currentResult + result
+			      case None => result
+			    }
+			  currentResultMap.updated(name, newResult)
+			}
 		}
 	}
 
